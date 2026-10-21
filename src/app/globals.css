@@ -47,3 +47,103 @@ a {
     color-scheme: dark;
   }
 }
+
+.markdown-content {
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  margin-top: 20px;
+  margin-bottom: 12px;
+  font-weight: 600;
+}
+
+.markdown-content p {
+  margin: 8px 0;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 24px;
+  margin: 8px 0;
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  border: 1px solid #e5e7eb;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.markdown-content pre {
+  overflow-x: auto;
+  border-radius: 8px;
+}
+
+.markdown-content code {
+  overflow-wrap: anywhere;
+}
+
+.chat-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.chat-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  flex-shrink: 0;
+  padding: 16px;
+  border-right: 1px solid #e8e8e8;
+  background: #fafafa;
+}
+
+.chat-session-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  overflow-y: auto;
+}
+
+.chat-session-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 8px;
+}
+
+.chat-session-item.active {
+  background: #e6f4ff;
+}
+
+.chat-session-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chat-main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+}

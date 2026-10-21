@@ -1,24 +1,37 @@
 {
-  "name": "ai-assistant",
+  "name": "agent-workbench",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "rag:evaluate": "tsx --env-file=.env.local scripts/rag-evaluate.ts",
+    "rag:multiturn": "tsx --env-file=.env.local scripts/rag-multiturn.ts"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.92",
+    "@ai-sdk/react": "^4.0.141",
+    "@ant-design/icons": "^6.3.4",
+    "ai": "^7.0.138",
+    "antd": "^6.6.6",
     "next": "16.4.0",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.2",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/react-syntax-highlighter": "^15.5.13",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "prettier-eslint": "^17.1.2",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   },
   "packageManager": "pnpm@10.25.0"

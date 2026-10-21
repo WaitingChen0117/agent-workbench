@@ -1,0 +1,60 @@
+[
+  {
+    "id": "react-state",
+    "query": "React 怎么管理组件状态？",
+    "shouldRetrieve": true,
+    "expectedKeywords": ["useState", "useReducer"]
+  },
+  {
+    "id": "react-reducer",
+    "query": "useState 和 useReducer 有什么区别？",
+    "shouldRetrieve": true,
+    "expectedKeywords": ["useState", "useReducer"]
+  },
+  {
+    "id": "react-effect",
+    "query": "React 中副作用应该怎么处理？",
+    "shouldRetrieve": true,
+    "expectedKeywords": ["useEffect"]
+  },
+  {
+    "id": "react-component",
+    "query": "React 组件之间有哪些常见的通信方式？",
+    "shouldRetrieve": true,
+    "expectedKeywords": ["Context"]
+  },
+  {
+    "id": "react-hook",
+    "query": "React Hook 使用时有哪些规则？",
+    "shouldRetrieve": true,
+    "expectedKeywords": ["Hook", "组件"]
+  },
+  {
+    "id": "javascript-promise",
+    "query": "JavaScript 中 Promise 是什么？",
+    "shouldRetrieve": false
+  },
+  {
+    "id": "javascript-async",
+    "query": "async 和 await 是怎么配合使用的？",
+    "shouldRetrieve": false
+  },
+  {
+    "id": "vue-reactive",
+    "query": "Vue 的响应式系统是怎么工作的？",
+    "shouldRetrieve": false,
+    "expectedKeywords": ["Vue", "响应式"]
+  },
+  {
+    "id": "quantum",
+    "query": "什么是量子纠缠？",
+    "shouldRetrieve": false,
+    "expectedKeywords": ["量子", "纠缠"]
+  },
+  {
+    "id": "history",
+    "query": "中国四大发明分别是什么？",
+    "shouldRetrieve": false,
+    "expectedKeywords": ["造纸术", "印刷术", "火药", "指南针"]
+  }
+]

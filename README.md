@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Agent Workbench
 
-## Getting Started
+基于 Next.js 16 构建的 AI 助手应用，集成了多轮对话、Agent 工具调用与 RAG 知识库检索能力。
 
-First, run the development server:
+## 功能特性
+
+- **对话聊天**：支持多会话管理的流式对话（`src/app/api/chat`、`ChatSidebar`）。
+- **Agent 工具调用**：基于工具注册表的 Agent 循环（`src/lib/agent`）。
+- **RAG 知识库**：文档上传、分块、向量化、索引与相似度检索的完整流程（`src/lib/rag`、`src/app/knowledge`）。
+- **模型接入**：对话模型与 Embedding 模型通过环境变量配置，默认对接百度千帆（Qianfan）。
+
+## 技术栈
+
+- Next.js 16 / React 19
+- TypeScript
+- Ant Design 6
+- Vercel AI SDK (`ai`、`@ai-sdk/openai`、`@ai-sdk/react`)
+- 包管理：pnpm
+
+## 快速开始
+
+### 1. 安装依赖
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. 配置环境变量
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+复制示例文件并填入你自己的密钥：
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+cp .env.example .env.local
+```
 
-## Learn More
+需要配置的变量见 `.env.example`：
 
-To learn more about Next.js, take a look at the following resources:
+- `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`：对话模型配置
+- `COMMON_API_KEY` / `EMBEDDING_MODEL`：向量化模型配置
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> `.env.local` 已在 `.gitignore` 中忽略，请勿将真实密钥提交到仓库。
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 3. 启动开发服务器
 
-## Deploy on Vercel
+```bash
+pnpm dev
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+浏览器打开 [http://localhost:3000](http://localhost:3000) 查看效果。
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 常用脚本
+
+```bash
+pnpm dev             # 启动开发服务器
+pnpm build           # 生产构建
+pnpm start           # 启动生产服务
+pnpm lint            # 代码检查
+pnpm rag:evaluate    # RAG 检索效果评估
+pnpm rag:multiturn   # RAG 多轮对话回归测试
+```
+
+## 目录结构
+
+```
+src/
+├── app/            # 页面与 API 路由（chat / agent / knowledge）
+├── components/     # UI 组件
+├── hooks/          # React Hooks
+├── lib/
+│   ├── agent/      # Agent 循环与工具
+│   ├── rag/        # RAG：分块、向量化、索引、检索
+│   └── chat/       # 消息处理
+└── types/          # 类型定义
+data/               # 知识库与评估数据
+scripts/            # RAG 评估脚本
+```
