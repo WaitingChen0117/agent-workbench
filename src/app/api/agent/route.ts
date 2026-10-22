@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { createAndRunTask } from "@/lib/agent/task/runtime";
+import {
+  createAndRunTask,
+  createAndStartTask,
+} from "@/lib/agent/task/runtime";
 import type { AgentMessage } from "@/lib/agent/loop";
 
 export const runtime = "nodejs";
@@ -21,6 +24,14 @@ function parseMessages(value: unknown): AgentMessage[] {
   );
 }
 
+/**
+ * POST /api/agent
+ *
+ * 默认（异步）：创建 Task 后立即返回 { taskId, status }，Agent 在后台执行，
+ *   客户端通过 GET /api/agent/tasks/:taskId/stream 订阅事件。
+ * 兼容（同步）：body 传 { "wait": true } 时 await 到结束，返回 { taskId, status, answer }，
+ *   保持第三阶段行为不变。
+ */
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -31,29 +42,36 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "messages 不能为空" }, { status: 400 });
     }
 
-    // 创建并运行一个可追踪的 Task（pending → running → completed/failed）
-    const { task } = await createAndRunTask({ messages });
+    const wait = body?.wait === true;
 
-    // 任务失败：映射成合适的 HTTP 状态码，但始终带上 taskId 与 status
-    if (task.status === "failed") {
-      const status = task.error?.code === "AGENT_LOOP_LIMIT" ? 409 : 500;
+    // -------- 同步模式（兼容旧行为）--------
+    if (wait) {
+      const { task } = await createAndRunTask({ messages });
 
-      return NextResponse.json(
-        {
-          taskId: task.id,
-          status: task.status,
-          error: task.error,
-        },
-        { status },
-      );
+      if (task.status === "failed") {
+        const status = task.error?.code === "AGENT_LOOP_LIMIT" ? 409 : 500;
+
+        return NextResponse.json(
+          { taskId: task.id, status: task.status, error: task.error },
+          { status },
+        );
+      }
+
+      return NextResponse.json({
+        taskId: task.id,
+        status: task.status,
+        answer: task.answer,
+        steps: task.currentStep,
+      });
     }
 
-    return NextResponse.json({
-      taskId: task.id,
-      status: task.status,
-      answer: task.answer,
-      steps: task.currentStep,
-    });
+    // -------- 异步模式（默认）--------
+    const task = createAndStartTask({ messages });
+
+    return NextResponse.json(
+      { taskId: task.id, status: task.status },
+      { status: 202 },
+    );
   } catch (error) {
     console.error("[Agent] 执行失败", error);
 
