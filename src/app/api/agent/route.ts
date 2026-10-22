@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 
-import {
-  AgentLoopLimitError,
-  runAgent,
-  type AgentMessage,
-} from "@/lib/agent/loop";
+import { createAndRunTask } from "@/lib/agent/task/runtime";
+import type { AgentMessage } from "@/lib/agent/loop";
 
 export const runtime = "nodejs";
 
@@ -34,28 +31,30 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "messages 不能为空" }, { status: 400 });
     }
 
-    const result = await runAgent({ messages });
+    // 创建并运行一个可追踪的 Task（pending → running → completed/failed）
+    const { task } = await createAndRunTask({ messages });
 
-    return NextResponse.json({
-      answer: result.answer,
-      toolCalls: result.toolCalls,
-      steps: result.steps,
-    });
-  } catch (error) {
-    // Agent Loop 达到步数上限：返回明确的结构化错误，而不是 500 崩溃
-    if (error instanceof AgentLoopLimitError) {
-      console.error("[Agent] loop limit", error.message);
+    // 任务失败：映射成合适的 HTTP 状态码，但始终带上 taskId 与 status
+    if (task.status === "failed") {
+      const status = task.error?.code === "AGENT_LOOP_LIMIT" ? 409 : 500;
 
       return NextResponse.json(
         {
-          error: "Agent loop limit reached",
-          code: "AGENT_LOOP_LIMIT",
-          steps: error.steps,
+          taskId: task.id,
+          status: task.status,
+          error: task.error,
         },
-        { status: 409 },
+        { status },
       );
     }
 
+    return NextResponse.json({
+      taskId: task.id,
+      status: task.status,
+      answer: task.answer,
+      steps: task.currentStep,
+    });
+  } catch (error) {
     console.error("[Agent] 执行失败", error);
 
     return NextResponse.json(

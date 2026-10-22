@@ -52,12 +52,31 @@ export interface AgentResult {
   steps: number;
 }
 
+/**
+ * Agent Loop 向外发出的细粒度事件。
+ * Loop 只负责「发事件」，不负责记录日志 / Task 状态 —— 由上层（Task Runtime）消费。
+ */
+export type AgentLoopEvent =
+  | { type: "agent.step.started"; step: number }
+  | { type: "llm.requested"; step: number }
+  | { type: "tool.started"; step: number; tool: string; input: unknown }
+  | {
+      type: "tool.completed";
+      step: number;
+      tool: string;
+      success: boolean;
+      output: unknown;
+    }
+  | { type: "agent.step.completed"; step: number; toolCalls: number };
+
 export interface RunAgentOptions {
   messages: AgentMessage[];
   // 默认使用全局 Tool Registry；测试时可注入 mock tools
   tools?: ToolSet;
   // 最大循环步数，默认 MAX_AGENT_STEPS
   maxSteps?: number;
+  // 可选事件回调；上层用它来记录 Task Event / 更新状态 / 打日志
+  onEvent?: (event: AgentLoopEvent) => void;
 }
 
 const AGENT_SYSTEM_PROMPT = `
@@ -85,6 +104,7 @@ export async function runAgent({
   messages,
   tools = toolRegistry,
   maxSteps = MAX_AGENT_STEPS,
+  onEvent,
 }: RunAgentOptions): Promise<AgentResult> {
   const modelMessages: ModelMessage[] = messages.map((message) => ({
     role: message.role,
@@ -110,22 +130,30 @@ export async function runAgent({
     onStepFinish(step) {
       stepIndex += 1;
 
-      console.log("[Agent Step]");
-      console.log("step:", stepIndex);
-      console.log("[LLM]");
-      console.log("request");
+      // 从一次已完成的 step 还原出有序的细粒度事件
+      onEvent?.({ type: "agent.step.started", step: stepIndex });
+      onEvent?.({ type: "llm.requested", step: stepIndex });
 
       for (const call of step.toolCalls) {
-        console.log("[Tool Call]");
-        console.log("name:", call.toolName);
-        console.log("arguments:", JSON.stringify(call.input));
+        onEvent?.({
+          type: "tool.started",
+          step: stepIndex,
+          tool: call.toolName,
+          input: call.input,
+        });
       }
 
       for (const toolResult of step.toolResults) {
         const output = toolResult.output as { success?: boolean } | undefined;
+        const success = output?.success ?? true;
 
-        console.log("[Tool Result]");
-        console.log("success:", output?.success ?? true);
+        onEvent?.({
+          type: "tool.completed",
+          step: stepIndex,
+          tool: toolResult.toolName,
+          success,
+          output: toolResult.output,
+        });
 
         collectedToolCalls.push({
           step: stepIndex,
@@ -134,6 +162,12 @@ export async function runAgent({
           output: toolResult.output,
         });
       }
+
+      onEvent?.({
+        type: "agent.step.completed",
+        step: stepIndex,
+        toolCalls: step.toolCalls.length,
+      });
     },
   });
 
@@ -142,16 +176,8 @@ export async function runAgent({
   // finishReason === 'tool-calls' 表示循环是被 stepCountIs 截断的：
   // LLM 仍想调用工具却已达上限，没有产出最终答案 → Agent Loop Limit
   if (result.finishReason === "tool-calls") {
-    console.log("[Agent]");
-    console.log("loop limit reached");
-    console.log("steps:", steps);
-
     throw new AgentLoopLimitError(steps);
   }
-
-  console.log("[Agent]");
-  console.log("completed");
-  console.log("steps:", steps);
 
   return {
     answer: result.text.trim(),
