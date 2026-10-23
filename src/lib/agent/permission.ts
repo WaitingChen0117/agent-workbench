@@ -27,7 +27,8 @@ const TOOL_POLICY: Record<string, ToolPermission> = {
   // 有副作用 → 需要人工审批
   writeFile: "approval_required",
   runCommand: "approval_required",
-  // 为未来预留（本阶段未实现）：gitAdd / gitCommit / gitPush 将是 approval_required
+  gitAdd: "approval_required",
+  gitCommit: "approval_required",
 };
 
 export function getToolPermission(toolName: string): ToolPermission {

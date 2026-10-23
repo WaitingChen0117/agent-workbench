@@ -193,11 +193,14 @@ export async function runWorkflow(
       executors.emitNode("workflow.node.completed", node);
     } catch (error) {
       executors.emitNode("workflow.node.failed", node);
-      execution.status = "failed";
-      execution.error = {
-        code: "NODE_FAILED",
-        message: error instanceof Error ? error.message : "node failed",
-      };
+      // 若节点执行中已被取消（如工具审批被拒），保持 cancelled，不覆盖为 failed
+      if (execution.status !== "cancelled") {
+        execution.status = "failed";
+        execution.error = {
+          code: "NODE_FAILED",
+          message: error instanceof Error ? error.message : "node failed",
+        };
+      }
       execution.endedAt = nowIso();
       executors.emitWorkflow("workflow.failed");
       return;

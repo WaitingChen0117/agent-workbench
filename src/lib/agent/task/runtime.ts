@@ -14,6 +14,7 @@ import * as eventBus from "@/lib/agent/task/event-bus";
 import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
 import { getToolPermission } from "@/lib/agent/permission";
+import { preApprovalGuard } from "@/lib/agent/guard";
 import { createApproval } from "@/lib/agent/approvals";
 import { startTrace } from "@/lib/agent/trace/collector";
 import {
@@ -138,8 +139,18 @@ function summarizeInput(toolName: string, input: unknown): unknown {
     return { program: obj.program, args: obj.args, cwd: obj.cwd };
   }
 
+  if (toolName === "gitAdd") {
+    return { paths: obj.paths };
+  }
+
+  if (toolName === "gitCommit") {
+    return { message: obj.message };
+  }
+
   return input;
 }
+
+const WORKSPACE_ROOT = process.cwd();
 
 export interface PermissionContext {
   taskId: string;
@@ -168,6 +179,13 @@ export function wrapToolsWithPermissions(
       input: unknown,
       options: Parameters<NonNullable<typeof originalExecute>>[1],
     ): Promise<unknown> => {
+      // 安全前置校验：敏感文件 / 路径穿越 / 非法 message 必须在审批之前就被拒
+      // （Permission Approval ≠ Security Bypass）
+      const guard = await preApprovalGuard(name, input, WORKSPACE_ROOT);
+      if (!guard.ok) {
+        return { success: false, error: `DENIED: ${guard.error}` };
+      }
+
       const { approval, decision } = createApproval(ctx.taskId, name, input);
 
       if (store.getTask(ctx.taskId)?.status === "running") {

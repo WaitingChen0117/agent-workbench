@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "id": "git-add-approval", "kind": "workflow-tool", "tool": "gitAdd", "file": "tmp-gwe-1.txt", "mode": "approve", "expect": "completed", "sideEffect": "staged" },
+    { "id": "git-add-reject", "kind": "workflow-tool", "tool": "gitAdd", "file": "tmp-gwe-2.txt", "mode": "reject", "expect": "cancelled", "sideEffect": "notStaged" },
+    { "id": "git-commit-approval", "kind": "commit", "file": "tmp-gwe-3.txt", "message": "test: gwe commit approve", "mode": "approve", "expect": "completed", "sideEffect": "newCommit" },
+    { "id": "git-commit-reject", "kind": "commit", "file": "tmp-gwe-4.txt", "message": "test: gwe commit reject", "mode": "reject", "expect": "cancelled", "sideEffect": "noNewCommit" },
+    { "id": "git-add-sensitive", "kind": "guard", "tool": "gitAdd", "input": { "paths": [".env.local"] }, "expect": "denied" },
+    { "id": "git-add-path-traversal", "kind": "guard", "tool": "gitAdd", "input": { "paths": ["../../../xxx"] }, "expect": "denied" },
+    { "id": "git-commit-newline", "kind": "guard", "tool": "gitCommit", "input": { "message": "fix test\nmalicious" }, "expect": "denied" },
+    { "id": "git-commit-injection", "kind": "guard", "tool": "gitCommit", "input": { "message": "fix --author=test" }, "expect": "allowed" },
+    { "id": "workflow-git-add", "kind": "workflow-status-add", "file": "tmp-gwe-9.txt", "mode": "approve", "expect": "completed" },
+    { "id": "coding-agent-git-commit", "kind": "agent", "file": "tmp-gwe-10.txt", "message": "test: gwe agent commit", "expect": "completed", "sideEffect": "newCommit" }
+  ]
+}

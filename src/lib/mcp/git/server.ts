@@ -11,6 +11,8 @@ import {
   gitLog,
   gitBranch,
   gitShow,
+  gitAdd,
+  gitCommit,
   GitSecurityError,
 } from "@/lib/mcp/git/core";
 
@@ -68,6 +70,38 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "gitAdd",
+    description:
+      "把明确指定的文件加入 Git 暂存区（git add -- <paths>）。不支持 . / -A 批量暂存；" +
+      "需要人工审批；敏感文件会被拒绝。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "要暂存的文件路径（相对 workspace 根），必须明确列出",
+        },
+      },
+      required: ["paths"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "gitCommit",
+    description:
+      "提交当前已暂存的改动（git commit -m <message>）。不会自动 add；需要人工审批；" +
+      "message 不能为空/含换行，最长 200 字符。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "提交信息（单行，<=200）" },
+      },
+      required: ["message"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 const server = new Server(
@@ -106,6 +140,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "gitShow":
         data = await gitShow(workspaceRoot, { ref: String(input.ref ?? "") });
+        break;
+      case "gitAdd":
+        data = await gitAdd(workspaceRoot, { paths: input.paths });
+        break;
+      case "gitCommit":
+        data = await gitCommit(workspaceRoot, { message: input.message });
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);

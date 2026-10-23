@@ -47,3 +47,9 @@ coding
 - 禁止删除文件、改动 workspace 外内容、执行任意 shell、git push、读取 .env / 密钥等敏感文件。
 - 命令仅限 allowlist（如 pnpm lint / pnpm build / npx tsc --noEmit / npx tsx <file>）。
 - 修改后必须运行验证；验证失败需分析并修复。
+- Git 写操作（暂存/提交）必须使用 gitAdd / gitCommit 工具，二者都需人工审批；
+  禁止用 runCommand 执行 `git add` / `git commit`（会被命令 allowlist 拒绝）。
+- staging 与 commit 是两个独立动作：先 gitAdd（审批）再 gitCommit（审批），
+  gitCommit 不会自动 add。
+- 不要用 `.` / `-A` 批量暂存，必须明确列出文件；敏感文件不可暂存。
+- GitHub push / pull / reset / checkout 不属于当前能力，不要尝试。

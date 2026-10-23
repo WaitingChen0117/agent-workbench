@@ -108,6 +108,7 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
 
       // 若审批被拒，permission gate 会把 task 置 cancelled 并中止
       if (store.getTask(taskId)?.status === "cancelled") {
+        execution.status = "cancelled";
         throw new Error("tool approval rejected");
       }
 

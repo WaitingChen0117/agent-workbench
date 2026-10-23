@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.3.0] - 2026-10-23 — Git Write MCP
+
+### Added
+
+- `gitAdd` and `gitCommit` on the Git MCP (fixed `git add -- <paths>` / `git commit -m`, no shell).
+- Pre-approval Guard: sensitive paths, traversal, bulk add, and invalid commit messages are denied before an approval is created.
+- Git Write Evaluation (`data/git-write-evaluation.json`) and the `git:write:evaluate` CLI.
+- Coding skill rules for staging and committing only through `gitAdd` / `gitCommit`.
+
+### Changed
+
+- `gitAdd` and `gitCommit` require human approval; commit does not auto-stage.
+- A rejected tool approval keeps the workflow `cancelled` instead of overwriting it as `failed`.
+
+### Security
+
+- `gitAdd` rejects bulk paths (`.`, `*`, `-A`), option-like paths, path traversal, and sensitive files.
+- Commit messages must be a single non-empty line of at most 200 characters.
+- Approval cannot bypass the pre-approval guard.
+
 ## [1.2.0] - 2026-10-23 — Git Read-only MCP
 
 ### Added

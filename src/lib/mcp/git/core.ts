@@ -3,6 +3,12 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  resolveSafePath,
+  isSensitivePath,
+  PathSecurityError,
+} from "@/lib/mcp/filesystem/core";
+
 const execFileAsync = promisify(execFile);
 
 /**
@@ -257,5 +263,150 @@ export async function gitShow(
   const { diff, truncated } = truncateDiff(raw, limits);
 
   return { hash, author, message, timestamp, diff, truncated };
+}
+
+// ===========================================================================
+// Git Write（Phase 9.2）—— gitAdd / gitCommit，均为固定语义、结构化参数。
+// ===========================================================================
+
+const MAX_ADD_PATHS = 100;
+const MAX_COMMIT_MESSAGE = 200;
+
+export interface AddValidation {
+  ok: boolean;
+  error?: string;
+  safePaths?: string[];
+}
+
+/**
+ * 校验 gitAdd 的 paths：非空、数量/格式、workspace 内、非敏感、禁 bulk。
+ * 供 gitAdd 与 pre-approval guard 共用（敏感/越界必须在审批之前就被拒）。
+ */
+export async function validateAddPaths(
+  workspaceRoot: string,
+  paths: unknown,
+): Promise<AddValidation> {
+  if (!Array.isArray(paths) || paths.length === 0) {
+    return { ok: false, error: "paths must be a non-empty array" };
+  }
+  if (paths.length > MAX_ADD_PATHS) {
+    return { ok: false, error: `too many paths (> ${MAX_ADD_PATHS})` };
+  }
+
+  const realRoot = await fs.realpath(workspaceRoot);
+  const safePaths: string[] = [];
+
+  for (const p of paths) {
+    if (typeof p !== "string" || !p.trim()) {
+      return { ok: false, error: "each path must be a non-empty string" };
+    }
+    if (p.startsWith("-")) {
+      return { ok: false, error: `path cannot start with '-': ${p}` };
+    }
+    if ([".", "*", "-A", "--all", ":/"].includes(p.trim())) {
+      return { ok: false, error: "bulk add (., *, -A) is not allowed" };
+    }
+
+    let resolved: string;
+    try {
+      resolved = await resolveSafePath(workspaceRoot, p);
+    } catch (error) {
+      if (error instanceof PathSecurityError) {
+        return { ok: false, error: error.message };
+      }
+      return { ok: false, error: `invalid path: ${p}` };
+    }
+
+    const rel = path.relative(realRoot, resolved);
+    if (isSensitivePath(rel)) {
+      return { ok: false, error: `sensitive file cannot be staged: ${rel}` };
+    }
+    safePaths.push(rel);
+  }
+
+  return { ok: true, safePaths };
+}
+
+export interface GitWriteResult {
+  success: boolean;
+  paths?: string[];
+  error?: string;
+}
+
+export async function gitAdd(
+  workspaceRoot: string,
+  options: { paths: unknown },
+): Promise<GitWriteResult> {
+  const v = await validateAddPaths(workspaceRoot, options.paths);
+  if (!v.ok || !v.safePaths) {
+    return { success: false, error: v.error };
+  }
+
+  try {
+    // 固定语义：git add -- <path...>，结构化参数，不经 shell
+    await runGit(workspaceRoot, ["add", "--", ...v.safePaths]);
+    return { success: true, paths: v.safePaths };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "git add failed",
+    };
+  }
+}
+
+export interface MessageValidation {
+  ok: boolean;
+  error?: string;
+  message?: string;
+}
+
+/**
+ * 校验 commit message：非空、<=200、trim、禁换行。
+ * 注意 --author 等注入在 execFile 固定参数下天然失效（只会作为 -m 的值）。
+ */
+export function validateCommitMessage(message: unknown): MessageValidation {
+  if (typeof message !== "string") {
+    return { ok: false, error: "message must be a string" };
+  }
+  const trimmed = message.trim();
+  if (!trimmed) {
+    return { ok: false, error: "message must not be empty" };
+  }
+  if (trimmed.length > MAX_COMMIT_MESSAGE) {
+    return { ok: false, error: `message too long (> ${MAX_COMMIT_MESSAGE})` };
+  }
+  if (/[\n\r]/.test(message)) {
+    return { ok: false, error: "message must not contain newlines" };
+  }
+  return { ok: true, message: trimmed };
+}
+
+export interface GitCommitResult {
+  success: boolean;
+  hash?: string;
+  message?: string;
+  error?: string;
+}
+
+export async function gitCommit(
+  workspaceRoot: string,
+  options: { message: unknown },
+): Promise<GitCommitResult> {
+  const v = validateCommitMessage(options.message);
+  if (!v.ok || !v.message) {
+    return { success: false, error: v.error };
+  }
+
+  try {
+    // 固定语义：git commit -m <message>，不自动 add，不接受其它参数
+    await runGit(workspaceRoot, ["commit", "-m", v.message]);
+    const hash = (await runGit(workspaceRoot, ["rev-parse", "HEAD"])).trim();
+    return { success: true, hash, message: v.message };
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "git commit failed",
+    };
+  }
 }
 
