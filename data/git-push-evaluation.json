@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "id": "git-push-approval", "kind": "workflow-push", "mode": "approve", "branch": "main", "expect": "completed" },
+    { "id": "git-push-reject", "kind": "workflow-push", "mode": "reject", "branch": "main", "expect": "cancelled" },
+    { "id": "git-push-default-origin", "kind": "validate-default" },
+    { "id": "git-push-invalid-remote", "kind": "guard", "input": { "remote": "evil", "branch": "main" } },
+    { "id": "git-push-force", "kind": "guard", "input": { "branch": "--force" } },
+    { "id": "git-push-invalid-branch", "kind": "guard", "input": { "branch": "../../main" } },
+    { "id": "git-push-unknown-branch", "kind": "guard", "input": { "branch": "definitely-not-a-branch-xyz" } },
+    { "id": "git-push-workflow", "kind": "workflow-status-push", "mode": "approve", "branch": "main", "expect": "completed" },
+    { "id": "git-push-trace", "kind": "trace", "branch": "main" },
+    { "id": "coding-agent-push", "kind": "agent" }
+  ]
+}

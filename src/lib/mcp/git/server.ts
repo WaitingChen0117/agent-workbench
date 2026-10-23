@@ -13,6 +13,7 @@ import {
   gitShow,
   gitAdd,
   gitCommit,
+  gitPush,
   GitSecurityError,
 } from "@/lib/mcp/git/core";
 
@@ -102,6 +103,20 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "gitPush",
+    description:
+      "把本地分支推送到 origin（git push origin <branch>）。需要人工审批；" +
+      "只允许 origin；不支持 force / 删除分支 / 设置 upstream / 任意参数；branch 必须真实存在。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        remote: { type: "string", description: "远程名，仅允许 origin（默认 origin）" },
+        branch: { type: "string", description: "要推送的本地分支，默认当前分支" },
+      },
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 const server = new Server(
@@ -146,6 +161,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       case "gitCommit":
         data = await gitCommit(workspaceRoot, { message: input.message });
+        break;
+      case "gitPush":
+        data = await gitPush(workspaceRoot, {
+          remote: input.remote,
+          branch: input.branch,
+        });
         break;
       default:
         throw new Error(`Unknown tool: ${name}`);

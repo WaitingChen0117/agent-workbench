@@ -15,6 +15,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.5.0] - 2026-10-23 — Git Push + Human Approval
+
+### Added
+
+- `gitPush` MCP tool (`git push origin <branch>` only).
+- Git Push Evaluation (`data/git-push-evaluation.json`) and the `git:push:evaluate` CLI.
+- Coding Agent Git Push workflow (push behind approval).
+
+### Changed
+
+- Git push integrated with the Permission Gate + Human Approval.
+- Workflow Tool Node supports `gitPush` (still approval-gated).
+- Coding Skill documents the controlled Git Push rules.
+
+### Security
+
+- `gitPush` requires Human Approval.
+- Only the `origin` remote is allowed.
+- No force push, no branch deletion, no `-u`/upstream, no arbitrary git arguments.
+- Invalid remote / branch (bad chars, `-` prefix, non-existent) rejected before approval.
+- No shell execution (structured `execFile` args); push output truncated; token never exposed.
+
 ## [1.4.0] - 2026-10-23 — GitHub Read-only MCP
 
 ### Added

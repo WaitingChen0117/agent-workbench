@@ -147,6 +147,10 @@ function summarizeInput(toolName: string, input: unknown): unknown {
     return { message: obj.message };
   }
 
+  if (toolName === "gitPush") {
+    return { remote: obj.remote ?? "origin", branch: obj.branch };
+  }
+
   return input;
 }
 

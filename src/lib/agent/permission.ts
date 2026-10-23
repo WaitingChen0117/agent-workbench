@@ -36,6 +36,7 @@ const TOOL_POLICY: Record<string, ToolPermission> = {
   runCommand: "approval_required",
   gitAdd: "approval_required",
   gitCommit: "approval_required",
+  gitPush: "approval_required",
 };
 
 export function getToolPermission(toolName: string): ToolPermission {

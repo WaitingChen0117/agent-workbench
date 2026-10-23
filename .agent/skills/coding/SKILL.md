@@ -56,3 +56,9 @@ coding
 - GitHub（只读）：可用 githubRepo / githubIssues / githubIssue / githubPullRequests /
   githubPullRequest 查询仓库信息、Issue、Pull Request；GitHub MCP 当前只读，
   不得创建/修改 Issue、不得创建/合并/评论/审查 PR、不得 push，也不要尝试任何写操作。
+- Git Push（高风险外部副作用）：
+  1. 必须使用 gitPush 工具，禁止用 runCommand 执行 git push；
+  2. gitPush 必须经过人工审批；
+  3. 默认只允许 push 到 origin，不允许 force push、不允许删除分支、不允许自动设置 upstream；
+  4. push 前先 gitStatus / gitDiff 并确认当前 branch；若存在未提交修改，先提示用户 commit，不要自动绕过 gitCommit 审批；
+  5. push 后再次 gitStatus 并总结；GitHub PR 不属于当前能力。

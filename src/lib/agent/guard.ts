@@ -1,6 +1,7 @@
 import {
   validateAddPaths,
   validateCommitMessage,
+  validatePushInput,
 } from "@/lib/mcp/git/core";
 
 /**
@@ -29,6 +30,14 @@ export async function preApprovalGuard(
 
   if (toolName === "gitCommit") {
     const v = validateCommitMessage(obj.message);
+    return v.ok ? { ok: true } : { ok: false, error: v.error };
+  }
+
+  if (toolName === "gitPush") {
+    const v = await validatePushInput(workspaceRoot, {
+      remote: obj.remote,
+      branch: obj.branch,
+    });
     return v.ok ? { ok: true } : { ok: false, error: v.error };
   }
 

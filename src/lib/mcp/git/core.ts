@@ -410,3 +410,115 @@ export async function gitCommit(
   }
 }
 
+// ===========================================================================
+// Git Push（Phase 9.4）—— 仅 `git push origin <branch>`，固定语义 + 人工审批。
+// ===========================================================================
+
+const ALLOWED_REMOTE = "origin";
+const MAX_PUSH_OUTPUT = 5000;
+// 禁止空白 / 控制字符 / shell 元字符
+const UNSAFE_BRANCH = /[\s;&|<>$()`\\]/;
+
+export interface PushValidation {
+  ok: boolean;
+  error?: string;
+  remote?: string;
+  branch?: string;
+}
+
+/**
+ * 校验 gitPush 输入：remote 只能 origin；branch 合法且真实存在于本地。
+ * 供 gitPush 与 pre-approval guard 共用（非法 remote/branch 必须在审批前被拒）。
+ */
+export async function validatePushInput(
+  workspaceRoot: string,
+  input: { remote?: unknown; branch?: unknown },
+): Promise<PushValidation> {
+  const remote = input.remote === undefined ? ALLOWED_REMOTE : input.remote;
+  if (remote !== ALLOWED_REMOTE) {
+    return { ok: false, error: `only '${ALLOWED_REMOTE}' remote is allowed` };
+  }
+
+  let branches: string[];
+  let current: string;
+  try {
+    const info = await gitBranch(workspaceRoot);
+    branches = info.branches;
+    current = info.current;
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : "not a git repository",
+    };
+  }
+
+  let branch: string;
+  if (input.branch === undefined || input.branch === null || input.branch === "") {
+    branch = current; // 默认当前分支
+  } else {
+    if (typeof input.branch !== "string") {
+      return { ok: false, error: "branch must be a string" };
+    }
+    branch = input.branch;
+  }
+
+  if (!branch || branch.length > 200) {
+    return { ok: false, error: "invalid branch name" };
+  }
+  if (branch.startsWith("-")) {
+    return { ok: false, error: `branch cannot start with '-': ${branch}` };
+  }
+  if (UNSAFE_BRANCH.test(branch)) {
+    return { ok: false, error: `branch contains unsafe characters: ${branch}` };
+  }
+  if (!branches.includes(branch)) {
+    return { ok: false, error: `branch does not exist locally: ${branch}` };
+  }
+
+  return { ok: true, remote: ALLOWED_REMOTE, branch };
+}
+
+export interface GitPushResult {
+  success: boolean;
+  remote: string;
+  branch?: string;
+  output?: string;
+  error?: string;
+}
+
+export async function gitPush(
+  workspaceRoot: string,
+  input: { remote?: unknown; branch?: unknown },
+): Promise<GitPushResult> {
+  const v = await validatePushInput(workspaceRoot, input);
+  if (!v.ok || !v.branch) {
+    return { success: false, remote: ALLOWED_REMOTE, error: v.error };
+  }
+
+  // 测试用 mock executor：验证/审批流程全部真实，仅跳过真实网络 push（不伪造真实成功）
+  if (process.env.AGENT_GIT_PUSH_MODE === "mock") {
+    return {
+      success: true,
+      remote: ALLOWED_REMOTE,
+      branch: v.branch,
+      output: "[mock push — not executed]",
+    };
+  }
+
+  try {
+    // 固定语义：git push origin <branch>，无 --force / -u / --delete 等任何额外参数
+    const cwd = await assertRepoInWorkspace(workspaceRoot);
+    const { stdout, stderr } = await execFileAsync(
+      "git",
+      ["push", ALLOWED_REMOTE, v.branch],
+      { cwd, shell: false, maxBuffer: 10 * 1024 * 1024 },
+    );
+    const output = `${stdout}${stderr}`.slice(0, MAX_PUSH_OUTPUT);
+    return { success: true, remote: ALLOWED_REMOTE, branch: v.branch, output };
+  } catch (error) {
+    const e = error as { stdout?: string; stderr?: string; message?: string };
+    const msg = (e.stderr ?? e.message ?? "git push failed").slice(0, MAX_PUSH_OUTPUT);
+    return { success: false, remote: ALLOWED_REMOTE, branch: v.branch, error: msg };
+  }
+}
+
