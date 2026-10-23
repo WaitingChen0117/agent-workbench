@@ -49,7 +49,7 @@ export interface RunTaskResult {
 }
 
 // 统一事件出口：落 Store（可选）并发布到 Event Bus
-function emit(
+export function emit(
   taskId: string,
   type: AgentTaskEventType,
   data?: unknown,
@@ -72,7 +72,7 @@ function emit(
 }
 
 // 把 Agent Loop 的细粒度事件映射成 Task Event，并同步 currentStep
-function makeLoopEventHandler(taskId: string) {
+export function makeLoopEventHandler(taskId: string) {
   return (event: AgentLoopEvent): void => {
     switch (event.type) {
       case "agent.step.started":
@@ -141,7 +141,7 @@ function summarizeInput(toolName: string, input: unknown): unknown {
   return input;
 }
 
-interface PermissionContext {
+export interface PermissionContext {
   taskId: string;
   abortController: AbortController;
 }
@@ -150,7 +150,7 @@ interface PermissionContext {
  * 给需要审批的工具包一层 Permission Gate：
  * 执行前进入 waiting + approval.required，等待 approve/reject。
  */
-function wrapToolsWithPermissions(
+export function wrapToolsWithPermissions(
   baseTools: ToolSet,
   ctx: PermissionContext,
 ): ToolSet {

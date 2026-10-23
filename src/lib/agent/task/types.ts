@@ -51,6 +51,12 @@ export type AgentTaskEventType =
   | "approval.required"
   | "approval.approved"
   | "approval.rejected"
+  | "workflow.started"
+  | "workflow.node.started"
+  | "workflow.node.completed"
+  | "workflow.node.failed"
+  | "workflow.completed"
+  | "workflow.failed"
   | "task.completed"
   | "task.failed"
   | "task.cancelled";

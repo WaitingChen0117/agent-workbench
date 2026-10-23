@@ -23,6 +23,8 @@ interface SpanState {
   llm: Map<number, AgentTraceStep>;
   tools: Array<{ step: number; tool: string; span: AgentTraceStep }>;
   approvals: Map<string, AgentTraceStep>;
+  nodes: Map<string, AgentTraceStep>;
+  currentNode?: { workflowId?: string; executionId?: string; nodeId?: string };
   unsubscribe?: () => void;
 }
 
@@ -67,6 +69,7 @@ export function startTrace(taskId: string): void {
     llm: new Map(),
     tools: [],
     approvals: new Map(),
+    nodes: new Map(),
   };
   spanStates.set(taskId, spans);
 
@@ -90,6 +93,8 @@ function openStep(
     type,
     startedAt,
     status: "running",
+    // 若当前处于某个 workflow node 内，自动打上归属标签
+    ...(spans.currentNode ?? {}),
     ...partial,
   };
   trace.steps.push(step);
@@ -228,5 +233,35 @@ function handleEvent(
     case "task.cancelled":
       finalize(trace, spans, ts, "cancelled");
       break;
+    case "workflow.node.started": {
+      spans.currentNode = {
+        workflowId: data.workflowId as string | undefined,
+        executionId: data.executionId as string | undefined,
+        nodeId: data.nodeId as string | undefined,
+      };
+      const s = openStep(trace, spans, "workflow", ts, {
+        name: `${String(data.nodeType ?? "node")}:${String(data.nodeId ?? "")}`,
+      });
+      if (data.nodeId) {
+        spans.nodes.set(String(data.nodeId), s);
+      }
+      break;
+    }
+    case "workflow.node.completed":
+    case "workflow.node.failed": {
+      const s = data.nodeId
+        ? spans.nodes.get(String(data.nodeId))
+        : undefined;
+      if (s) {
+        closeSpan(
+          s,
+          ts,
+          event.type === "workflow.node.failed" ? "failed" : "completed",
+        );
+        spans.nodes.delete(String(data.nodeId));
+      }
+      spans.currentNode = undefined;
+      break;
+    }
   }
 }

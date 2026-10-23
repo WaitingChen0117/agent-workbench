@@ -5,7 +5,13 @@
  * 它由 Event 派生，不替代 Event（Event 是实时流，Trace 是落盘聚合）。
  */
 
-export type TraceStepType = "agent" | "llm" | "tool" | "approval" | "error";
+export type TraceStepType =
+  | "agent"
+  | "llm"
+  | "tool"
+  | "approval"
+  | "error"
+  | "workflow";
 
 export type TraceStatus =
   | "running"
@@ -33,6 +39,10 @@ export interface AgentTraceStep {
   input?: unknown; // 已脱敏
   output?: unknown; // 已脱敏
   usage?: LlmUsage; // 仅在 Provider 提供时存在，绝不伪造
+  // Workflow 归属（可选）：让 Trace 知道某步属于哪个 workflow / execution / node
+  workflowId?: string;
+  executionId?: string;
+  nodeId?: string;
 }
 
 export interface AgentTrace {

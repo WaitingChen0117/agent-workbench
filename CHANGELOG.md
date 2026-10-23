@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.1.0] - 2026-10-23 — Agent Workflow / DAG Runtime
+
+### Added
+
+- Workflow Definition (nodes + edges + version).
+- Workflow Validator (DAG, unique start, reachability, maxSteps).
+- Workflow Engine (node orchestration + context).
+- Agent Node, Tool Node, Approval Node, Condition Node, End Node.
+- Workflow Execution + Workflow Context.
+- Workflow Events (workflow.started / node.started / node.completed / node.failed / completed / failed).
+- Workflow API (`POST /api/agent/workflows/run`, `GET /api/agent/workflows/:executionId`).
+- Workflow Evaluation with 10 cases and the `workflow:evaluate` CLI.
+- Trace steps can now carry workflowId / executionId / nodeId.
+
+### Changed
+
+- Agent Runtime can execute structured workflows inside a Task.
+- Workflow Nodes reuse existing Agent / Tool / Permission / Approval / Trace infrastructure.
+
+### Security
+
+- Workflow cannot bypass the Permission Gate (writeFile / runCommand still require approval).
+- No arbitrary JavaScript execution (no eval / Function; conditions are declarative field/operator/value).
+- No arbitrary shell execution (commands still go through the allowlist).
+- Workflow DAG validation (cycles, missing nodes, unreachable nodes rejected).
+- maxSteps execution limit prevents runaway workflows.
+
 ## [1.0.0] - 2026-10-23 — Agent Trace + Observability + Evaluation
 
 ### Added

@@ -1,0 +1,207 @@
+{
+  "cases": [
+    {
+      "id": "simple-agent",
+      "description": "agent -> end",
+      "mode": "approve",
+      "workflow": {
+        "id": "wf-simple-agent",
+        "name": "simple-agent",
+        "version": "1",
+        "nodes": [
+          { "id": "a1", "type": "agent", "config": { "instructions": "用一句话回答：React 是什么？" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [{ "source": "a1", "target": "e1" }]
+      },
+      "successCriteria": [{ "type": "executionStatus", "value": "completed" }]
+    },
+    {
+      "id": "tool-execution",
+      "description": "tool(searchFiles) -> end",
+      "workflow": {
+        "id": "wf-tool",
+        "name": "tool-execution",
+        "version": "1",
+        "nodes": [
+          { "id": "t1", "type": "tool", "config": { "tool": "searchFiles", "input": { "query": "Agent", "path": "src/lib/agent" }, "output": "searchResult" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [{ "source": "t1", "target": "e1" }]
+      },
+      "successCriteria": [
+        { "type": "executionStatus", "value": "completed" },
+        { "type": "contextHas", "key": "searchResult" }
+      ]
+    },
+    {
+      "id": "approval",
+      "description": "approval -> end (approve)",
+      "mode": "approve",
+      "workflow": {
+        "id": "wf-approval",
+        "name": "approval",
+        "version": "1",
+        "nodes": [
+          { "id": "ap1", "type": "approval", "config": { "reason": "please approve to continue" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [{ "source": "ap1", "target": "e1" }]
+      },
+      "successCriteria": [{ "type": "executionStatus", "value": "completed" }]
+    },
+    {
+      "id": "approval-reject",
+      "description": "approval -> end (reject) => cancelled",
+      "mode": "reject",
+      "workflow": {
+        "id": "wf-approval-reject",
+        "name": "approval-reject",
+        "version": "1",
+        "nodes": [
+          { "id": "ap1", "type": "approval", "config": { "reason": "reject me" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [{ "source": "ap1", "target": "e1" }]
+      },
+      "successCriteria": [{ "type": "executionStatus", "value": "cancelled" }]
+    },
+    {
+      "id": "tool-condition",
+      "description": "tool(runCommand) -> condition(exitCode==0) -> end",
+      "mode": "approve",
+      "workflow": {
+        "id": "wf-tool-condition",
+        "name": "tool-condition",
+        "version": "1",
+        "nodes": [
+          { "id": "t1", "type": "tool", "config": { "tool": "runCommand", "input": { "program": "npx", "args": ["tsc", "--version"] }, "output": "testResult" } },
+          { "id": "c1", "type": "condition", "config": { "field": "testResult.exitCode", "operator": "equals", "value": 0 } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [
+          { "source": "t1", "target": "c1" },
+          { "source": "c1", "target": "e1", "condition": { "branch": "true" } }
+        ]
+      },
+      "successCriteria": [
+        { "type": "executionStatus", "value": "completed" },
+        { "type": "contextHas", "key": "testResult" }
+      ]
+    },
+    {
+      "id": "tool-condition-false",
+      "description": "condition false branch",
+      "mode": "approve",
+      "workflow": {
+        "id": "wf-cond-false",
+        "name": "tool-condition-false",
+        "version": "1",
+        "nodes": [
+          { "id": "t1", "type": "tool", "config": { "tool": "runCommand", "input": { "program": "npx", "args": ["tsc", "--version"] }, "output": "testResult" } },
+          { "id": "c1", "type": "condition", "config": { "field": "testResult.exitCode", "operator": "equals", "value": 1 } },
+          { "id": "eT", "type": "end" },
+          { "id": "eF", "type": "end" }
+        ],
+        "edges": [
+          { "source": "t1", "target": "c1" },
+          { "source": "c1", "target": "eT", "condition": { "branch": "true" } },
+          { "source": "c1", "target": "eF", "condition": { "branch": "false" } }
+        ]
+      },
+      "successCriteria": [{ "type": "executionStatus", "value": "completed" }]
+    },
+    {
+      "id": "invalid-dag",
+      "description": "cycle must be rejected",
+      "expectInvalid": true,
+      "workflow": {
+        "id": "wf-cycle",
+        "name": "invalid-dag",
+        "version": "1",
+        "nodes": [
+          { "id": "n1", "type": "condition", "config": { "field": "input", "operator": "exists" } },
+          { "id": "n2", "type": "condition", "config": { "field": "input", "operator": "exists" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [
+          { "source": "n1", "target": "n2" },
+          { "source": "n2", "target": "n1" },
+          { "source": "n1", "target": "e1" }
+        ]
+      }
+    },
+    {
+      "id": "missing-node",
+      "description": "edge to nonexistent node must be rejected",
+      "expectInvalid": true,
+      "workflow": {
+        "id": "wf-missing",
+        "name": "missing-node",
+        "version": "1",
+        "nodes": [
+          { "id": "a1", "type": "agent", "config": { "instructions": "noop" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [
+          { "source": "a1", "target": "e1" },
+          { "source": "a1", "target": "ghost" }
+        ]
+      }
+    },
+    {
+      "id": "max-steps",
+      "description": "exceed maxSteps must fail",
+      "input": { "x": 1 },
+      "workflow": {
+        "id": "wf-maxsteps",
+        "name": "max-steps",
+        "version": "1",
+        "maxSteps": 1,
+        "nodes": [
+          { "id": "c1", "type": "condition", "config": { "field": "input", "operator": "exists" } },
+          { "id": "c2", "type": "condition", "config": { "field": "input", "operator": "exists" } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [
+          { "source": "c1", "target": "c2", "condition": { "branch": "true" } },
+          { "source": "c2", "target": "e1", "condition": { "branch": "true" } }
+        ]
+      },
+      "successCriteria": [
+        { "type": "executionStatus", "value": "failed" },
+        { "type": "errorCode", "value": "WORKFLOW_MAX_STEPS" }
+      ]
+    },
+    {
+      "id": "coding-workflow",
+      "description": "agent -> writeFile -> runCommand -> condition -> end",
+      "mode": "approve",
+      "cleanup": ["tmp-wf-demo.txt"],
+      "workflow": {
+        "id": "wf-coding",
+        "name": "coding-workflow",
+        "version": "1",
+        "maxSteps": 50,
+        "nodes": [
+          { "id": "a1", "type": "agent", "config": { "instructions": "简要说明接下来将创建一个临时演示文件。" } },
+          { "id": "w1", "type": "tool", "config": { "tool": "writeFile", "input": { "path": "tmp-wf-demo.txt", "content": "workflow demo" }, "output": "writeResult" } },
+          { "id": "r1", "type": "tool", "config": { "tool": "runCommand", "input": { "program": "npx", "args": ["tsc", "--version"] }, "output": "testResult" } },
+          { "id": "c1", "type": "condition", "config": { "field": "testResult.exitCode", "operator": "equals", "value": 0 } },
+          { "id": "e1", "type": "end" }
+        ],
+        "edges": [
+          { "source": "a1", "target": "w1" },
+          { "source": "w1", "target": "r1" },
+          { "source": "r1", "target": "c1" },
+          { "source": "c1", "target": "e1", "condition": { "branch": "true" } }
+        ]
+      },
+      "successCriteria": [
+        { "type": "executionStatus", "value": "completed" },
+        { "type": "contextHas", "key": "writeResult" },
+        { "type": "contextHas", "key": "testResult" }
+      ]
+    }
+  ]
+}
