@@ -8,6 +8,33 @@
 - **Agent 工具调用**：基于工具注册表的 Agent 循环（`src/lib/agent`）。
 - **RAG 知识库**：文档上传、分块、向量化、索引与相似度检索的完整流程（`src/lib/rag`、`src/app/knowledge`）。
 - **模型接入**：对话模型与 Embedding 模型通过环境变量配置，默认对接百度千帆（Qianfan）。
+- **MCP 与 Skills**：本地工具和文件系统 MCP 走同一套解析；技能从 `.agent/skills` 加载。
+- **Coding Agent**：`writeFile` 和 `runCommand` 必须先经过人工审批。
+- **Trace**：任务结束后仍可查看步骤、工具、审批和指标，并用 `pnpm agent:evaluate` 做回归。
+
+## 架构演进
+
+当前版本是 **v1.0.0**。v0.8.0 之前的能力没有单独发版，图中按代码里的阶段标出；从 v0.8.0 起与 CHANGELOG 一致。
+
+```mermaid
+flowchart LR
+  A["基线<br/>对话 · RAG · 本地工具"] --> B["Agent Loop<br/>多步工具调用"]
+  B --> C["Task Runtime<br/>可查询的任务状态"]
+  C --> D["v0.8.0<br/>SSE · MCP · Skills"]
+  D --> E["v0.9.0<br/>Coding Agent<br/>写文件和执行命令需审批"]
+  E --> F["v1.0.0<br/>Trace · 指标 · 评估"]
+```
+
+每一版在上一版之上加一层，不替换原有路径：
+
+| 版本 | 新增 |
+| --- | --- |
+| 基线 | 多会话对话、RAG 检索、本地工具（`searchKnowledge`、`getCurrentTime`） |
+| Agent Loop | LLM 与工具交替执行，步数达到上限则失败 |
+| Task Runtime | 一次执行变成任务：`pending → running → completed / failed`，可用 task id 查询 |
+| v0.8.0 MCP + Skills | SSE 推送事件；Tool Resolver 合并本地工具与 filesystem MCP；从 `.agent/skills` 加载技能。文件访问限制在工作区根目录 |
+| v0.9.0 Coding Agent | `writeFile`、白名单 `runCommand`；有副作用的工具先进入 `waiting`，批准后才继续 |
+| v1.0.0 Trace | Event Bus 聚合成可回读的 Trace 和指标；脱敏后不保存文件正文和敏感命令输出；`pnpm agent:evaluate` 跑固定用例 |
 
 ## 技术栈
 
@@ -57,6 +84,7 @@ pnpm start           # 启动生产服务
 pnpm lint            # 代码检查
 pnpm rag:evaluate    # RAG 检索效果评估
 pnpm rag:multiturn   # RAG 多轮对话回归测试
+pnpm agent:evaluate  # Agent Trace 回归评估
 ```
 
 ## 目录结构
@@ -67,7 +95,8 @@ src/
 ├── components/     # UI 组件
 ├── hooks/          # React Hooks
 ├── lib/
-│   ├── agent/      # Agent 循环与工具
+│   ├── agent/      # Loop、Task、审批、Trace
+│   ├── mcp/        # filesystem MCP 与受控命令
 │   ├── rag/        # RAG：分块、向量化、索引、检索
 │   └── chat/       # 消息处理
 └── types/          # 类型定义

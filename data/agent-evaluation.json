@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "id": "coding-find-file",
+      "task": "找到实现 Agent Task Runtime 的源码文件，并告诉我它的相对路径。",
+      "expectedTools": ["searchFiles"],
+      "maxSteps": 10,
+      "successCriteria": [
+        { "type": "statusCompleted" },
+        { "type": "answerContains", "value": "runtime.ts" }
+      ]
+    },
+    {
+      "id": "coding-read-file",
+      "task": "阅读 Agent Loop 的实现（src/lib/agent/loop.ts），用中文解释它是如何执行 Tool 的。请基于真实代码。",
+      "expectedTools": ["readFile"],
+      "maxSteps": 10,
+      "successCriteria": [
+        { "type": "statusCompleted" },
+        { "type": "toolUsed", "tool": "readFile" }
+      ]
+    },
+    {
+      "id": "coding-health-api",
+      "task": "确认项目中是否存在 /api/health 接口；若不存在，请创建 src/app/api/health/route.ts，导出 GET 返回 { status: \"ok\" }。",
+      "expectedTools": ["listFiles", "readFile"],
+      "maxSteps": 14,
+      "successCriteria": [
+        { "type": "statusCompleted" },
+        { "type": "fileExists", "path": "src/app/api/health/route.ts" }
+      ]
+    },
+    {
+      "id": "coding-test",
+      "task": "对本项目运行 TypeScript 类型检查（使用 runCommand 执行 npx tsc --noEmit），并告诉我是否通过。",
+      "expectedTools": ["runCommand"],
+      "maxSteps": 10,
+      "successCriteria": [
+        { "type": "statusCompleted" },
+        { "type": "toolUsed", "tool": "runCommand" }
+      ]
+    },
+    {
+      "id": "coding-repair",
+      "task": "文件 src/eval-fixme.ts 中存在一个简单的 TypeScript 类型错误，请修复它，保持它导出一个 number 类型的常量 n（例如 42）。",
+      "expectedTools": ["readFile", "writeFile"],
+      "maxSteps": 14,
+      "setup": { "writeFile": "src/eval-fixme.ts", "content": "export const n: number = \"not a number\";\n" },
+      "cleanup": ["src/eval-fixme.ts"],
+      "successCriteria": [
+        { "type": "statusCompleted" },
+        { "type": "fileNotContains", "path": "src/eval-fixme.ts", "value": "not a number" }
+      ]
+    }
+  ]
+}

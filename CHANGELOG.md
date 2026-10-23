@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.0.0] - 2026-10-23 — Agent Trace + Observability + Evaluation
+
+### Added
+
+- Added Agent Trace (a persisted, aggregated view of a task's execution).
+- Added a Trace Collector that builds traces by subscribing to the Event Bus.
+- Added an in-memory Trace Store that survives task completion.
+- Added the Trace API (`GET /api/agent/tasks/:taskId/trace`).
+- Added the Trace Summary API (`GET /api/agent/tasks/:taskId/trace/summary`).
+- Added tool execution tracing (duration, status, sanitized input/output).
+- Added approval tracing (wait duration, approved/rejected).
+- Added LLM step tracing (latency; token usage only when the provider reports it).
+- Added derived Agent Metrics (task/agent/tool/approval/llm).
+- Added Agent Evaluation with 5 cases (`data/agent-evaluation.json`).
+- Added the `agent:evaluate` CLI.
+
+### Changed
+
+- Agent Event now feeds the Trace Collector.
+- Agent execution can be inspected after completion via the Trace API.
+
+### Security
+
+- Added Trace data sanitization.
+- Avoid persisting file contents (writeFile keeps only path + bytesWritten).
+- Avoid persisting sensitive command output (truncated previews, redacted secret keys).
+
 ## [0.9.0] - 2026-10-22 — Coding Agent MVP
 
 ### Added

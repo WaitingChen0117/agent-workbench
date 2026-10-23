@@ -15,6 +15,11 @@ import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
 import { getToolPermission } from "@/lib/agent/permission";
 import { createApproval } from "@/lib/agent/approvals";
+import { startTrace } from "@/lib/agent/trace/collector";
+import {
+  sanitizeToolInput,
+  sanitizeToolOutput,
+} from "@/lib/agent/trace/sanitize";
 import type {
   AgentTask,
   AgentTaskEvent,
@@ -81,7 +86,7 @@ function makeLoopEventHandler(taskId: string) {
         emit(taskId, "tool.started", {
           step: event.step,
           tool: event.tool,
-          input: event.input,
+          input: sanitizeToolInput(event.tool, event.input),
         });
         break;
       case "tool.completed":
@@ -89,6 +94,7 @@ function makeLoopEventHandler(taskId: string) {
           step: event.step,
           tool: event.tool,
           success: event.success,
+          result: sanitizeToolOutput(event.tool, event.output),
         });
         break;
       case "agent.step.completed":
@@ -278,6 +284,7 @@ export function createAndStartTask({
   maxSteps = MAX_AGENT_STEPS,
 }: RunTaskInput): AgentTask {
   const task = store.createTask({ messages, maxSteps });
+  startTrace(task.id); // 先订阅，保证捕获 task.created 之后的完整生命周期
   emit(task.id, "task.created");
 
   // 后台执行，不阻塞 HTTP 响应。
@@ -297,6 +304,7 @@ export async function createAndRunTask({
   maxSteps = MAX_AGENT_STEPS,
 }: RunTaskInput): Promise<RunTaskResult> {
   const task = store.createTask({ messages, maxSteps });
+  startTrace(task.id);
   emit(task.id, "task.created");
 
   await executeTask(task.id);
