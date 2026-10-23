@@ -12,11 +12,11 @@
 - **Coding Agent**：`writeFile` 和 `runCommand` 必须先经过人工审批。
 - **Trace**：任务结束后仍可查看步骤、工具、审批和指标，并用 `pnpm agent:evaluate` 做回归。
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
-- **Git**：通过只读 MCP 查看 status、diff、log、branch 和 show。
+- **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd` 与 `gitCommit` 必须先过前置校验，再等人批准。
 
 ## 架构演进
 
-当前版本是 **v1.2.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.3.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -42,7 +42,9 @@ flowchart TB
   agentNode --> gate
   toolNode --> gate
   gate -->|只读| resolver["Tool Resolver"]
-  gate -->|写或执行| approval["Approval"]
+  gate -->|写或执行| guard{"前置校验"}
+  guard -->|敏感路径 / 非法 message| denied["DENIED，不建审批"]
+  guard -->|通过| approval["Approval"]
   approval -->|批准| resolver
   approval -->|拒绝| cancel["任务取消"]
   resolver --> local["本地 Tool"]
@@ -50,7 +52,8 @@ flowchart TB
   resolver --> gitmcp["Git MCP"]
   local --> rag
   fsmcp --> files["读 / 写 / 命令"]
-  gitmcp --> git["status / diff / log / branch / show"]
+  gitmcp --> gitRead["status / diff / log / branch / show"]
+  gitmcp --> gitWrite["add / commit"]
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -66,6 +69,7 @@ flowchart TB
 | v1.0.0 Trace | Event Bus 聚合成可回读的 Trace 和指标；脱敏后不保存文件正文和敏感命令输出；`pnpm agent:evaluate` 跑固定用例 |
 | v1.1.0 Workflow | 校验通过的有向无环图可在任务内执行；节点为 Agent、Tool、Condition、Approval、End |
 | v1.2.0 Git MCP | 只读查看仓库状态、差异、日志、分支和提交；不能 add、commit 或 push |
+| v1.3.0 Git 写入 | 暂存明确列出的文件并提交已暂存改动；写入先校验再审批，不能 push |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -120,6 +124,7 @@ pnpm rag:multiturn   # RAG 多轮对话回归测试
 pnpm agent:evaluate  # Agent Trace 回归评估
 pnpm workflow:evaluate  # Workflow 回归评估
 pnpm git:evaluate    # Git 只读工具回归评估
+pnpm git:write:evaluate  # Git 写入工具回归评估
 ```
 
 ## 目录结构
