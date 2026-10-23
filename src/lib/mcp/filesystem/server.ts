@@ -8,9 +8,11 @@ import {
 import {
   listFiles,
   readFile,
+  writeFile,
   searchFiles,
   PathSecurityError,
 } from "@/lib/mcp/filesystem/core";
+import { runCommand, CommandSecurityError } from "@/lib/mcp/command/core";
 
 /**
  * filesystem-mcp —— 最小 MCP Server（stdio transport）
@@ -62,6 +64,41 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "writeFile",
+    description:
+      "写入（创建或覆盖）workspace 内的文本文件。path 相对 workspace 根；" +
+      "受安全校验限制，禁止写入 workspace 外或敏感文件。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "相对 workspace 根的文件路径" },
+        content: { type: "string", description: "要写入的完整文本内容" },
+      },
+      required: ["path", "content"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "runCommand",
+    description:
+      "在 workspace 内执行受控的开发命令（结构化 program + args，不经过 shell）。" +
+      "仅允许 allowlist 内命令，如 pnpm lint / pnpm build / npx tsc --noEmit / npx tsx <file>。",
+    inputSchema: {
+      type: "object",
+      properties: {
+        program: { type: "string", description: "启动器，仅限 pnpm / npm / npx" },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "命令参数数组，例如 ['lint'] 或 ['tsc','--noEmit']",
+        },
+        cwd: { type: "string", description: "工作目录，相对 workspace 根，默认根目录" },
+      },
+      required: ["program", "args"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 const server = new Server(
@@ -98,6 +135,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           String(input.path ?? "."),
         );
         break;
+      case "writeFile":
+        data = await writeFile(
+          workspaceRoot,
+          String(input.path ?? ""),
+          String(input.content ?? ""),
+        );
+        break;
+      case "runCommand":
+        data = await runCommand(workspaceRoot, {
+          program: String(input.program ?? ""),
+          args: Array.isArray(input.args) ? input.args.map(String) : [],
+          cwd: input.cwd === undefined ? undefined : String(input.cwd),
+        });
+        break;
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -108,7 +159,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } catch (error) {
     // 安全错误与普通错误都以结构化 isError 返回，交给 Agent/LLM 处理，不崩溃
     const message =
-      error instanceof PathSecurityError
+      error instanceof PathSecurityError || error instanceof CommandSecurityError
         ? error.message
         : error instanceof Error
           ? error.message

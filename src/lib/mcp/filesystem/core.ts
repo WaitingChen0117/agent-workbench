@@ -39,10 +39,40 @@ const IGNORED_DIRS = new Set([
 ]);
 
 const MAX_READ_BYTES = 200_000; // readFile 上限，避免超大文件
+const MAX_WRITE_BYTES = 500_000; // writeFile 上限
 const MAX_SEARCH_MATCHES = 50;
+
+// 敏感文件 denylist：即使位于 workspace 内也禁止读写。
+// 「workspace 内部」不等于「全部安全」。
+const SENSITIVE_DIR_SEGMENTS = new Set([".ssh", ".aws", ".config", ".git"]);
+
+export function isSensitivePath(relativePath: string): boolean {
+  const base = path.basename(relativePath);
+
+  // .env / .env.local / .env.production ...
+  if (base === ".env" || base.startsWith(".env.")) {
+    return true;
+  }
+
+  // 私钥 / 证书
+  if (/\.(pem|key|p12|pfx)$/i.test(base) || base === "id_rsa") {
+    return true;
+  }
+
+  // 敏感目录（.ssh / .aws / .config / .git）
+  const segments = relativePath.split(path.sep);
+  return segments.some((segment) => SENSITIVE_DIR_SEGMENTS.has(segment));
+}
 
 function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(root + path.sep);
+}
+
+function assertNotSensitive(realRoot: string, resolved: string): void {
+  const rel = path.relative(realRoot, resolved);
+  if (isSensitivePath(rel)) {
+    throw new PathSecurityError(`Access denied: sensitive file (${rel})`);
+  }
 }
 
 // 允许目标暂不存在：退回到最近的存在祖先做 realpath，再拼回
@@ -112,12 +142,47 @@ export async function readFile(
   workspaceRoot: string,
   userPath: string,
 ): Promise<string> {
+  const realRoot = await fs.realpath(workspaceRoot);
   const safe = await resolveSafePath(workspaceRoot, userPath);
+  assertNotSensitive(realRoot, safe);
+
   const content = await fs.readFile(safe, "utf-8");
 
   return content.length > MAX_READ_BYTES
     ? content.slice(0, MAX_READ_BYTES) + "\n…（内容已截断）"
     : content;
+}
+
+export interface WriteResult {
+  path: string; // 相对 workspaceRoot
+  bytesWritten: number;
+}
+
+export async function writeFile(
+  workspaceRoot: string,
+  userPath: string,
+  content: string,
+): Promise<WriteResult> {
+  if (typeof content !== "string") {
+    throw new Error("writeFile: content must be a string");
+  }
+
+  const bytes = Buffer.byteLength(content, "utf-8");
+  if (bytes > MAX_WRITE_BYTES) {
+    throw new Error(
+      `writeFile: content too large (${bytes} > ${MAX_WRITE_BYTES} bytes)`,
+    );
+  }
+
+  const realRoot = await fs.realpath(workspaceRoot);
+  const safe = await resolveSafePath(workspaceRoot, userPath);
+  assertNotSensitive(realRoot, safe);
+
+  // 目标目录不存在时自动创建（仍受 resolveSafePath 约束在 workspace 内）
+  await fs.mkdir(path.dirname(safe), { recursive: true });
+  await fs.writeFile(safe, content, "utf-8");
+
+  return { path: path.relative(realRoot, safe), bytesWritten: bytes };
 }
 
 export async function searchFiles(
@@ -158,6 +223,11 @@ export async function searchFiles(
 
       if (!dirent.isFile()) {
         continue;
+      }
+
+      const relForFile = path.relative(realRoot, full);
+      if (isSensitivePath(relForFile)) {
+        continue; // 敏感文件不纳入搜索
       }
 
       let content: string;

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { ToolSet } from "ai";
+
 import {
   AgentLoopLimitError,
   streamAgent,
@@ -11,6 +13,8 @@ import * as store from "@/lib/agent/task/store";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
+import { getToolPermission } from "@/lib/agent/permission";
+import { createApproval } from "@/lib/agent/approvals";
 import type {
   AgentTask,
   AgentTaskEvent,
@@ -112,7 +116,100 @@ function makeLoopEventHandler(taskId: string) {
   };
 }
 
-// 执行一个已创建的 Task：pending → running → completed / failed
+// 审批事件对外只暴露必要信息，不泄露完整敏感内容（如文件全文）
+function summarizeInput(toolName: string, input: unknown): unknown {
+  const obj = (input ?? {}) as Record<string, unknown>;
+
+  if (toolName === "writeFile") {
+    return {
+      path: obj.path,
+      contentLength:
+        typeof obj.content === "string" ? obj.content.length : undefined,
+    };
+  }
+
+  if (toolName === "runCommand") {
+    return { program: obj.program, args: obj.args, cwd: obj.cwd };
+  }
+
+  return input;
+}
+
+interface PermissionContext {
+  taskId: string;
+  abortController: AbortController;
+}
+
+/**
+ * 给需要审批的工具包一层 Permission Gate：
+ * 执行前进入 waiting + approval.required，等待 approve/reject。
+ */
+function wrapToolsWithPermissions(
+  baseTools: ToolSet,
+  ctx: PermissionContext,
+): ToolSet {
+  const wrapped: ToolSet = {};
+
+  for (const [name, toolDef] of Object.entries(baseTools)) {
+    const originalExecute = toolDef.execute;
+
+    if (getToolPermission(name) !== "approval_required" || !originalExecute) {
+      wrapped[name] = toolDef;
+      continue;
+    }
+
+    const gatedExecute = async (
+      input: unknown,
+      options: Parameters<NonNullable<typeof originalExecute>>[1],
+    ): Promise<unknown> => {
+      const { approval, decision } = createApproval(ctx.taskId, name, input);
+
+      if (store.getTask(ctx.taskId)?.status === "running") {
+        store.transitionTask(ctx.taskId, "waiting");
+      }
+      emit(ctx.taskId, "approval.required", {
+        approvalId: approval.id,
+        toolName: name,
+        reason: `Tool "${name}" requires approval before execution`,
+        input: summarizeInput(name, input),
+      });
+
+      const status = await decision;
+
+      if (status === "approved") {
+        if (store.getTask(ctx.taskId)?.status === "waiting") {
+          store.transitionTask(ctx.taskId, "running");
+        }
+        emit(ctx.taskId, "approval.approved", {
+          approvalId: approval.id,
+          toolName: name,
+        });
+        return originalExecute(input, options);
+      }
+
+      // rejected：取消任务并中止 Agent Loop
+      emit(ctx.taskId, "approval.rejected", {
+        approvalId: approval.id,
+        toolName: name,
+      });
+      if (store.getTask(ctx.taskId)?.status === "waiting") {
+        store.transitionTask(ctx.taskId, "cancelled");
+        emit(ctx.taskId, "task.cancelled", { reason: "approval rejected" });
+      }
+      ctx.abortController.abort();
+      return { success: false, error: "Operation rejected by user" };
+    };
+
+    wrapped[name] = {
+      ...toolDef,
+      execute: gatedExecute,
+    } as typeof toolDef;
+  }
+
+  return wrapped;
+}
+
+// 执行一个已创建的 Task：pending → running →（可选 waiting）→ completed / failed / cancelled
 async function executeTask(taskId: string): Promise<void> {
   const task = store.getTask(taskId);
 
@@ -123,28 +220,44 @@ async function executeTask(taskId: string): Promise<void> {
   store.transitionTask(taskId, "running");
   emit(taskId, "task.started");
 
+  const abortController = new AbortController();
+
   try {
-    // 解析统一工具集（Local + MCP）并加载 Skill 指令；二者都优雅降级
-    const [tools, instructions] = await Promise.all([
+    // 解析统一工具集（Local + MCP），再包一层 Permission Gate；加载 Skill 指令
+    const [baseTools, instructions] = await Promise.all([
       resolveTools(),
       loadSkillInstructions(),
     ]);
+
+    const tools = wrapToolsWithPermissions(baseTools, {
+      taskId,
+      abortController,
+    });
 
     const result = await streamAgent({
       messages: task.messages,
       maxSteps: task.maxSteps,
       tools,
       instructions,
+      abortSignal: abortController.signal,
       onEvent: makeLoopEventHandler(taskId),
     });
 
-    store.updateTask(taskId, {
-      answer: result.answer,
-      currentStep: result.steps,
-    });
-    store.transitionTask(taskId, "completed");
-    emit(taskId, "task.completed", { steps: result.steps });
+    // 仅当仍在 running 时收尾为 completed（可能已被 reject 置为 cancelled）
+    if (store.getTask(taskId)?.status === "running") {
+      store.updateTask(taskId, {
+        answer: result.answer,
+        currentStep: result.steps,
+      });
+      store.transitionTask(taskId, "completed");
+      emit(taskId, "task.completed", { steps: result.steps });
+    }
   } catch (error) {
+    // 已被 reject 等终态化则不再处理（幂等）
+    if (store.getTask(taskId)?.status !== "running") {
+      return;
+    }
+
     const code =
       error instanceof AgentLoopLimitError ? "AGENT_LOOP_LIMIT" : "AGENT_ERROR";
     const message =

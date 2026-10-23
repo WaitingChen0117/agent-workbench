@@ -48,6 +48,9 @@ export type AgentTaskEventType =
   | "tool.started"
   | "tool.completed"
   | "agent.step.completed"
+  | "approval.required"
+  | "approval.approved"
+  | "approval.rejected"
   | "task.completed"
   | "task.failed"
   | "task.cancelled";

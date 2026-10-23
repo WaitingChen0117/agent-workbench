@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [0.9.0] - 2026-10-22 — Coding Agent MVP
+
+### Added
+
+- Added a Coding Agent MVP (Read → Analyze → Edit → Test → Fix loop).
+- Added the `writeFile` MCP tool.
+- Added controlled command execution (`runCommand`) with a structured program/args interface.
+- Added an Agent Permission Policy (allow vs approval_required per tool).
+- Added human-in-the-loop approval with a lifecycle-aware `AgentApproval`.
+- Added the Approval API (`GET /approvals`, `POST /approvals/:id`).
+- Added the `coding` Skill.
+- Added a `/api/health` endpoint plus a basic test (first real Coding Agent task).
+
+### Changed
+
+- Agent Loop now supports paused execution and approval-based resumption
+  (running → waiting → running/cancelled).
+- Tool execution now passes through permission checks before running.
+
+### Security
+
+- Restricted file modification to the workspace root.
+- Restricted command execution through an allowlist (structured args, no shell).
+- Blocked shell-injection patterns in commands.
+- Blocked sensitive file access (`.env*`, keys, `.ssh`/`.aws`/`.config`) even inside the workspace.
+- Required approval before any file modification or command execution.
+
 ## [0.8.0] - 2026-10-22 — MCP + Skills
 
 ### Added
