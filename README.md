@@ -36,6 +36,8 @@ flowchart LR
 | v0.9.0 Coding Agent | `writeFile`、白名单 `runCommand`；有副作用的工具先进入 `waiting`，批准后才继续 |
 | v1.0.0 Trace | Event Bus 聚合成可回读的 Trace 和指标；脱敏后不保存文件正文和敏感命令输出；`pnpm agent:evaluate` 跑固定用例 |
 
+每个版本的工作流和相对上一版的变化见 [docs/architecture](docs/architecture/README.md)。
+
 ## 技术栈
 
 - Next.js 16 / React 19
