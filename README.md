@@ -14,11 +14,12 @@
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
-- **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。默认仍是进程内内存；设置 `AGENT_TASK_STORE=sqlite` 后写入 `.data/agent.sqlite`。重启时未完成的任务收成 failed，不会续跑或自动批准。
+- **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。默认仍是进程内内存；设置 `AGENT_TASK_STORE=sqlite` 后写入 `.data/agent.sqlite`。重启时 `running` 收成 failed，不重新执行。
+- **Approval**：审批状态可单独持久化（`AGENT_APPROVAL_STORE=sqlite`，与任务同一个库）。两边都打开时，未决审批的任务保持等待；重启后批准会再校验一次，并只执行那一个工具。
 
 ## 架构演进
 
-当前版本是 **v1.7.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.8.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -47,7 +48,14 @@ flowchart TB
   gate -->|写或执行| guard{"前置校验"}
   guard -->|非法路径 / message / 分支| denied["DENIED，不建审批"]
   guard -->|通过| approval["Approval"]
-  approval -->|批准| resolver
+  approval --> apprStore["ApprovalStore"]
+  approval --> waiter["ApprovalWaiter"]
+  waiter -->|同进程批准| resolver
+  decision["applyApprovalDecision"] --> apprStore
+  decision -->|无 waiter| resume["只执行该工具一次"]
+  resume --> guard
+  apprStore -->|默认| apprMem["MemoryApprovalStore"]
+  apprStore -->|sqlite| apprSql["SQLiteApprovalStore"]
   approval -->|拒绝| cancel["任务取消"]
   resolver --> local["本地 Tool"]
   resolver --> fsmcp["Filesystem MCP"]
@@ -67,8 +75,10 @@ flowchart TB
   store -->|默认| memory["MemoryTaskStore"]
   store -->|sqlite| sqlite["SQLiteTaskStore"]
   sqlite --> db[".data/agent.sqlite"]
+  apprSql --> db
   boot["进程启动"] --> recover["recoverTasks"]
   recover --> store
+  recover --> apprStore
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -89,6 +99,7 @@ flowchart TB
 | v1.5.0 Git Push | 把本地分支推到 origin；先校验 remote 和分支，再人工审批；不能 force push |
 | v1.6.0 Task Persistence | 任务状态和事件经 TaskStore 读写；实现仍是进程内内存，重启后不保留 |
 | v1.7.0 SQLite | 可选把任务和事件写入 SQLite；重启后 running / waiting 收成 failed，不续跑、不自动批准 |
+| v1.8.0 审批持久化 | 未决审批可跨重启保留；批准后重新校验，并只补执行那一个工具 |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -148,6 +159,7 @@ pnpm github:evaluate # GitHub 只读工具回归评估
 pnpm git:push:evaluate  # Git 推送回归评估
 pnpm task:persistence:evaluate  # 任务存储回归评估
 pnpm task:sqlite:evaluate  # SQLite 持久化与崩溃恢复评估
+pnpm approval:persistence:evaluate  # 审批持久化与跨进程恢复评估
 ```
 
 ## 目录结构
