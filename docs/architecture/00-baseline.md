@@ -6,18 +6,15 @@
 
 本地工具函数（知识库检索、当前时间）这时已经作为库代码存在，但调用方是服务端，不是模型。
 
-```mermaid
-flowchart TD
-  user["用户消息"] --> chat["POST /api/chat"]
-  chat --> history["取最近对话作为改写上下文"]
-  history --> rewrite{"需要改写查询?"}
-  rewrite -->|是| query["用模型改写成独立问题"]
-  rewrite -->|否| search["向量检索 topK"]
-  query --> search
-  search --> prompt["把命中片段写进系统提示"]
-  prompt --> llm["模型流式回答"]
-  llm --> client["返回 UI 消息流"]
+```text
+              Chat
+               ↓
+              RAG
+               ↓
+              LLM
 ```
+
+还没有 Agent、Tool、Task Runtime。服务端自己走完这三层。
 
 ### 相对上一版
 

@@ -14,18 +14,19 @@
 
 ## 架构演进
 
-当前版本是 **v1.0.0**。v0.8.0 之前的能力没有单独发版，图中按代码里的阶段标出；从 v0.8.0 起与 CHANGELOG 一致。
+当前版本是 **v1.0.0**。分层从上到下是：
 
-```mermaid
-flowchart LR
-  A["基线<br/>对话 · RAG · 本地工具"] --> B["Agent Loop<br/>多步工具调用"]
-  B --> C["Task Runtime<br/>可查询的任务状态"]
-  C --> D["v0.8.0<br/>SSE · MCP · Skills"]
-  D --> E["v0.9.0<br/>Coding Agent<br/>写文件和执行命令需审批"]
-  E --> F["v1.0.0<br/>Trace · 指标 · 评估"]
+```text
+           Agent          Tool
+                ↓
+           Task Runtime
+                ↓
+      MCP      Skills     Approval
+                ↓
+              Trace
 ```
 
-每一版在上一版之上加一层，不替换原有路径：
+每一版只往这张图里加层，不替换原有路径。各版的图和相对上一版的变化见 [docs/architecture](docs/architecture/README.md)。
 
 | 版本 | 新增 |
 | --- | --- |
@@ -36,7 +37,7 @@ flowchart LR
 | v0.9.0 Coding Agent | `writeFile`、白名单 `runCommand`；有副作用的工具先进入 `waiting`，批准后才继续 |
 | v1.0.0 Trace | Event Bus 聚合成可回读的 Trace 和指标；脱敏后不保存文件正文和敏感命令输出；`pnpm agent:evaluate` 跑固定用例 |
 
-每个版本的工作流和相对上一版的变化见 [docs/architecture](docs/architecture/README.md)。
+每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
 ## 技术栈
 

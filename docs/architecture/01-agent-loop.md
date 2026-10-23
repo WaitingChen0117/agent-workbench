@@ -6,15 +6,13 @@
 
 `/api/chat` 的检索后回答路径保留，不改成 Agent。
 
-```mermaid
-flowchart TD
-  req["用户消息"] --> loop["runAgent"]
-  loop --> llm["模型"]
-  llm -->|无工具调用| answer["最终答案"]
-  llm -->|有工具调用| tool["执行 searchKnowledge 或 getCurrentTime"]
-  tool --> llm
-  llm -->|达到步数仍要调用工具| limit["Agent Loop Limit"]
+```text
+              Agent
+               ↓
+              Tool
 ```
+
+本版新加的层是 Agent 和 Tool。Agent 决定要不要往下调用 Tool；Tool 只有 `searchKnowledge` 和 `getCurrentTime`。没有 Task Runtime，一次调用结束就结束。
 
 ### 从基线转变了什么
 

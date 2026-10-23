@@ -4,15 +4,15 @@
 
 Agent Loop 仍然负责「模型和工具怎么交替」。这一版在它外面加了任务：每次请求先变成一条有 id、有状态的 Task，再驱动 Loop。调用方不必一直握着那次函数调用，可以用 task id 回来看状态和答案。
 
-```mermaid
-flowchart TD
-  post["POST /api/agent"] --> create["创建 Task：pending"]
-  create --> run["转到 running"]
-  run --> loop["runAgent"]
-  loop -->|正常答案| done["completed，写入 answer"]
-  loop -->|步数上限或其他异常| fail["failed，写入 error"]
-  get["GET /api/agent/tasks/:taskId"] --> read["读状态、步数、答案或错误"]
+```text
+              Agent
+               ↓
+              Tool
+               ↓
+          Task Runtime
 ```
+
+本版新加的层是 Task Runtime。它包住上一版的 Agent 和 Tool：先记下任务，再驱动循环，结束后用 task id 还能读到状态和答案。
 
 状态只允许这些转换：
 
