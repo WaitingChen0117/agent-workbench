@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getApproval, resolveApproval } from "@/lib/agent/approvals";
 
 export const runtime = "nodejs";
@@ -19,7 +19,7 @@ export async function POST(
 ) {
   const { taskId, approvalId } = await params;
 
-  if (!getTask(taskId)) {
+  if (!(await getTaskStore().get(taskId))) {
     return NextResponse.json(
       { error: "Task not found", taskId },
       { status: 404 },

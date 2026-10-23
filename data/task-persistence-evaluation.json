@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "id": "create", "kind": "create" },
+    { "id": "update", "kind": "update" },
+    { "id": "state-lifecycle", "kind": "lifecycle" },
+    { "id": "failed", "kind": "failed" },
+    { "id": "cancelled", "kind": "cancelled" },
+    { "id": "delete", "kind": "delete" },
+    { "id": "list", "kind": "list" },
+    { "id": "runtime-integration", "kind": "runtime" },
+    { "id": "approval-integration", "kind": "approval" },
+    { "id": "cancel-idempotency", "kind": "cancel-idempotent" }
+  ]
+}

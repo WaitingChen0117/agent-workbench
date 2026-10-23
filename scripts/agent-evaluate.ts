@@ -4,7 +4,7 @@ import path from "node:path";
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { resolveApproval } from "@/lib/agent/approvals";
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getTraceByTask } from "@/lib/agent/trace/store";
 import { computeMetrics } from "@/lib/agent/trace/metrics";
 
@@ -42,8 +42,8 @@ interface DriveResult {
   toolNames: string[];
 }
 
-function driveTask(content: string, maxSteps: number): Promise<DriveResult> {
-  const task = createAndStartTask({ messages: [{ role: "user", content }], maxSteps });
+async function driveTask(content: string, maxSteps: number): Promise<DriveResult> {
+  const task = await createAndStartTask({ messages: [{ role: "user", content }], maxSteps });
   const toolNames: string[] = [];
 
   return new Promise((resolve) => {
@@ -56,8 +56,9 @@ function driveTask(content: string, maxSteps: number): Promise<DriveResult> {
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();
-        const final = getTask(task.id);
-        resolve({ taskId: task.id, status: final?.status, answer: final?.answer, toolNames });
+        void getTaskStore().get(task.id).then((final) =>
+          resolve({ taskId: task.id, status: final?.status ?? undefined, answer: final?.answer, toolNames }),
+        );
       }
     });
   });

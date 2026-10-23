@@ -66,7 +66,7 @@ export async function POST(req: Request) {
     }
 
     // -------- 异步模式（默认）--------
-    const task = createAndStartTask({ messages });
+    const task = await createAndStartTask({ messages });
 
     return NextResponse.json(
       { taskId: task.id, status: task.status },

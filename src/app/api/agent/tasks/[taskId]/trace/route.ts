@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getTraceByTask } from "@/lib/agent/trace/store";
 import { computeMetrics } from "@/lib/agent/trace/metrics";
 
@@ -13,7 +13,7 @@ export async function GET(
 ) {
   const { taskId } = await params;
 
-  if (!getTask(taskId)) {
+  if (!(await getTaskStore().get(taskId))) {
     return NextResponse.json(
       { error: "Task not found", taskId },
       { status: 404 },

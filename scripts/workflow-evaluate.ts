@@ -26,8 +26,8 @@ interface WfCase {
   successCriteria?: Criterion[];
 }
 
-function runWorkflowCase(c: WfCase): Promise<{ status: string | undefined; context: Record<string, unknown>; errorCode?: string }> {
-  const execution = createAndStartWorkflowTask({ definition: c.workflow, input: c.input });
+async function runWorkflowCase(c: WfCase): Promise<{ status: string | undefined; context: Record<string, unknown>; errorCode?: string }> {
+  const execution = await createAndStartWorkflowTask({ definition: c.workflow, input: c.input });
   return new Promise((resolve) => {
     const unsub = eventBus.subscribe(execution.taskId, (e) => {
       if (e.type === "approval.required") {

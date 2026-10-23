@@ -12,7 +12,7 @@ import { sanitizeToolOutput } from "@/lib/agent/trace/sanitize";
 import { getMcpClient } from "@/lib/mcp/client";
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 
 const ROOT = process.cwd();
 const CONFIGURED = !!(process.env.GITHUB_TOKEN && process.env.GITHUB_OWNER && process.env.GITHUB_REPO);
@@ -93,7 +93,7 @@ async function runCase(c: GhCase): Promise<{ outcome: Outcome; note: string }> {
     }
     case "agent": {
       if (!CONFIGURED) return { outcome: "SKIP", note: "not configured" };
-      const task = createAndStartTask({
+      const task = await createAndStartTask({
         messages: [{ role: "user", content: "查看这个 GitHub 仓库最近有哪些 Open Issues 和 Pull Requests，并总结。" }],
         maxSteps: 8,
       });
@@ -104,7 +104,8 @@ async function runCase(c: GhCase): Promise<{ outcome: Outcome; note: string }> {
           if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") { unsub(); resolve(); }
         });
       });
-      const ok = getTask(task.id)?.status === "completed" && tools.includes("githubIssues") && tools.includes("githubPullRequests");
+      const finalTask = await getTaskStore().get(task.id);
+      const ok = finalTask?.status === "completed" && tools.includes("githubIssues") && tools.includes("githubPullRequests");
       return { outcome: ok ? "PASS" : "FAIL", note: `tools=${tools.join(",")}` };
     }
     default:

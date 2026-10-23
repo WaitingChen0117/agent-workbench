@@ -15,6 +15,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.6.0] - 2026-10-23 — Task Persistence
+
+### Added
+
+- `TaskStore` abstraction (async create/get/update/transition/delete/list + event storage).
+- `MemoryTaskStore` (globalThis-backed Map, async API simulating future persistence).
+- Task Persistence Evaluation (`data/task-persistence-evaluation.json`) and the `task:persistence:evaluate` CLI.
+
+### Changed
+
+- Task Runtime no longer touches `globalThis`/`Map` directly; it depends on `TaskStore`.
+- Task lifecycle state changes (created/running/waiting/completed/failed/cancelled) all go through the Store.
+- Task APIs (`GET /api/agent/tasks/:taskId`, stream, approvals, trace) read task state from the Store.
+- `createAndStartTask` / `createAndStartWorkflowTask` are now async (await the store).
+- `transition` is idempotent for same-state (repeated cancel no longer errors).
+
 ## [1.5.0] - 2026-10-23 — Git Push + Human Approval
 
 ### Added

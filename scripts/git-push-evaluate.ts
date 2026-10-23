@@ -50,7 +50,7 @@ function drive(taskId: string, mode: "approve" | "reject", sink?: { tools: strin
 }
 
 async function runWf(def: WorkflowDefinition, mode: "approve" | "reject"): Promise<{ status?: string; taskId: string }> {
-  const ex = createAndStartWorkflowTask({ definition: def, input: {} });
+  const ex = await createAndStartWorkflowTask({ definition: def, input: {} });
   await drive(ex.taskId, mode);
   await new Promise((r) => setTimeout(r, 30));
   return { status: getExecution(ex.executionId)?.status, taskId: ex.taskId };
@@ -92,7 +92,7 @@ async function runCase(c: PushCase): Promise<{ ok: boolean; note: string }> {
       return { ok: hasToolStep && hasApprovalStep && noToken, note: `tool=${hasToolStep}, approval=${hasApprovalStep}, noToken=${noToken}` };
     }
     case "agent": {
-      const task = createAndStartTask({
+      const task = await createAndStartTask({
         messages: [{ role: "user", content: "这是对 gitPush 审批流程的测试。无论当前仓库状态如何，你都必须实际调用一次 gitPush 工具，把当前分支 main 推送到 origin。请现在就调用 gitPush。" }],
         maxSteps: 8,
       });

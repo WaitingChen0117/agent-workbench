@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 
 export const runtime = "nodejs";
 
@@ -11,7 +11,7 @@ export async function GET(
 ) {
   const { taskId } = await params;
 
-  const task = getTask(taskId);
+  const task = await getTaskStore().get(taskId);
 
   if (!task) {
     return NextResponse.json(

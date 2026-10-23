@@ -9,7 +9,7 @@ import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
 import { getExecution } from "@/lib/agent/workflow/execution-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { resolveApproval } from "@/lib/agent/approvals";
-import { getTask } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import type { WorkflowDefinition } from "@/lib/agent/workflow/types";
 
 const exec = promisify(execFile);
@@ -44,7 +44,7 @@ function driveTask(taskId: string, mode: "approve" | "reject"): Promise<void> {
 }
 
 async function runWorkflow(def: WorkflowDefinition, mode: "approve" | "reject"): Promise<string | undefined> {
-  const ex = createAndStartWorkflowTask({ definition: def, input: {} });
+  const ex = await createAndStartWorkflowTask({ definition: def, input: {} });
   await driveTask(ex.taskId, mode);
   // 让引擎 catch/收尾完成后再读 execution 状态，避免与 task.cancelled 事件竞争
   await new Promise((r) => setTimeout(r, 30));
@@ -115,14 +115,15 @@ async function runCase(c: { id: string; kind: string } & WfCase): Promise<{ ok: 
     case "agent": {
       await fs.writeFile(path.join(ROOT, c.file as string), "gwe agent\n", "utf-8");
       const before = await head();
-      const task = createAndStartTask({
+      const task = await createAndStartTask({
         messages: [{ role: "user", content: `请用 gitAdd 暂存文件 ${c.file}，再用 gitCommit 提交，message 为 "${c.message}"。只暂存这个文件。` }],
         maxSteps: 12,
       });
       await driveTask(task.id, "approve");
       const after = await head();
-      const ok = getTask(task.id)?.status === "completed" && before !== after;
-      return { ok, note: `status=${getTask(task.id)?.status}, headChanged=${before !== after}` };
+      const finalStatus = (await getTaskStore().get(task.id))?.status;
+      const ok = finalStatus === "completed" && before !== after;
+      return { ok, note: `status=${finalStatus}, headChanged=${before !== after}` };
     }
     default:
       return { ok: false, note: "unknown kind" };

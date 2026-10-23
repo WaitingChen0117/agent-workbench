@@ -9,8 +9,8 @@ import {
   type AgentMessage,
   type AgentLoopEvent,
 } from "@/lib/agent/loop";
-import * as store from "@/lib/agent/task/store";
 import * as eventBus from "@/lib/agent/task/event-bus";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
 import { getToolPermission } from "@/lib/agent/permission";
@@ -49,6 +49,9 @@ export interface RunTaskResult {
   events: AgentTaskEvent[];
 }
 
+// Runtime 只依赖 TaskStore 抽象，不直接操作 globalThis / Map
+const taskStore = getTaskStore();
+
 // 统一事件出口：落 Store（可选）并发布到 Event Bus
 export function emit(
   taskId: string,
@@ -64,9 +67,10 @@ export function emit(
     data,
   };
 
-  // message.delta 量大，只做实时推送、不落 Store，避免内存膨胀与无意义重放
+  // message.delta 量大，只做实时推送、不落 Store，避免内存膨胀与无意义重放。
+  // 内存 Store 的 append 同步完成，这里 fire-and-forget 不影响顺序。
   if (options?.persist !== false) {
-    store.appendEvent(taskId, event);
+    void taskStore.appendEvent(taskId, event);
   }
 
   eventBus.publish(event);
@@ -77,7 +81,7 @@ export function makeLoopEventHandler(taskId: string) {
   return (event: AgentLoopEvent): void => {
     switch (event.type) {
       case "agent.step.started":
-        store.updateTask(taskId, { currentStep: event.step });
+        void taskStore.update(taskId, { currentStep: event.step });
         emit(taskId, "agent.step.started", { step: event.step });
         break;
       case "llm.requested":
@@ -192,8 +196,8 @@ export function wrapToolsWithPermissions(
 
       const { approval, decision } = createApproval(ctx.taskId, name, input);
 
-      if (store.getTask(ctx.taskId)?.status === "running") {
-        store.transitionTask(ctx.taskId, "waiting");
+      if ((await taskStore.get(ctx.taskId))?.status === "running") {
+        await taskStore.transition(ctx.taskId, "waiting");
       }
       emit(ctx.taskId, "approval.required", {
         approvalId: approval.id,
@@ -205,8 +209,8 @@ export function wrapToolsWithPermissions(
       const status = await decision;
 
       if (status === "approved") {
-        if (store.getTask(ctx.taskId)?.status === "waiting") {
-          store.transitionTask(ctx.taskId, "running");
+        if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
+          await taskStore.transition(ctx.taskId, "running");
         }
         emit(ctx.taskId, "approval.approved", {
           approvalId: approval.id,
@@ -220,8 +224,8 @@ export function wrapToolsWithPermissions(
         approvalId: approval.id,
         toolName: name,
       });
-      if (store.getTask(ctx.taskId)?.status === "waiting") {
-        store.transitionTask(ctx.taskId, "cancelled");
+      if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
+        await taskStore.transition(ctx.taskId, "cancelled");
         emit(ctx.taskId, "task.cancelled", { reason: "approval rejected" });
       }
       ctx.abortController.abort();
@@ -239,13 +243,13 @@ export function wrapToolsWithPermissions(
 
 // 执行一个已创建的 Task：pending → running →（可选 waiting）→ completed / failed / cancelled
 async function executeTask(taskId: string): Promise<void> {
-  const task = store.getTask(taskId);
+  const task = await taskStore.get(taskId);
 
   if (!task) {
     return;
   }
 
-  store.transitionTask(taskId, "running");
+  await taskStore.transition(taskId, "running");
   emit(taskId, "task.started");
 
   const abortController = new AbortController();
@@ -272,17 +276,17 @@ async function executeTask(taskId: string): Promise<void> {
     });
 
     // 仅当仍在 running 时收尾为 completed（可能已被 reject 置为 cancelled）
-    if (store.getTask(taskId)?.status === "running") {
-      store.updateTask(taskId, {
+    if ((await taskStore.get(taskId))?.status === "running") {
+      await taskStore.update(taskId, {
         answer: result.answer,
         currentStep: result.steps,
       });
-      store.transitionTask(taskId, "completed");
+      await taskStore.transition(taskId, "completed");
       emit(taskId, "task.completed", { steps: result.steps });
     }
   } catch (error) {
     // 已被 reject 等终态化则不再处理（幂等）
-    if (store.getTask(taskId)?.status !== "running") {
+    if ((await taskStore.get(taskId))?.status !== "running") {
       return;
     }
 
@@ -291,8 +295,8 @@ async function executeTask(taskId: string): Promise<void> {
     const message =
       error instanceof Error ? error.message : "Agent execution failed";
 
-    store.updateTask(taskId, { error: { code, message } });
-    store.transitionTask(taskId, "failed");
+    await taskStore.update(taskId, { error: { code, message } });
+    await taskStore.transition(taskId, "failed");
     emit(taskId, "task.failed", { code, message });
   }
 }
@@ -301,17 +305,15 @@ async function executeTask(taskId: string): Promise<void> {
  * 异步模式：创建并立即返回 Task，Agent 在后台执行。
  * 调用方拿到 taskId 后即可连接 SSE 订阅事件。
  */
-export function createAndStartTask({
+export async function createAndStartTask({
   messages,
   maxSteps = MAX_AGENT_STEPS,
-}: RunTaskInput): AgentTask {
-  const task = store.createTask({ messages, maxSteps });
+}: RunTaskInput): Promise<AgentTask> {
+  const task = await taskStore.create({ messages, maxSteps });
   startTrace(task.id); // 先订阅，保证捕获 task.created 之后的完整生命周期
   emit(task.id, "task.created");
 
   // 后台执行，不阻塞 HTTP 响应。
-  // 注意：依赖进程在响应返回后继续存活（本地 Node 可行）；
-  // Serverless / Edge 可能在响应后冻结或回收实例，需要外部 Worker 支撑。
   void executeTask(task.id);
 
   return task;
@@ -325,14 +327,14 @@ export async function createAndRunTask({
   messages,
   maxSteps = MAX_AGENT_STEPS,
 }: RunTaskInput): Promise<RunTaskResult> {
-  const task = store.createTask({ messages, maxSteps });
+  const task = await taskStore.create({ messages, maxSteps });
   startTrace(task.id);
   emit(task.id, "task.created");
 
   await executeTask(task.id);
 
   return {
-    task: store.getTask(task.id) as AgentTask,
-    events: store.getEvents(task.id),
+    task: (await taskStore.get(task.id)) as AgentTask,
+    events: await taskStore.getEvents(task.id),
   };
 }

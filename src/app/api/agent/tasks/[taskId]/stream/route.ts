@@ -1,5 +1,4 @@
-import { getTask } from "@/lib/agent/task/store";
-import { getEvents } from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import type { AgentTaskEvent, AgentTaskEventType } from "@/lib/agent/task/types";
 
@@ -45,7 +44,7 @@ export async function GET(
 ) {
   const { taskId } = await params;
 
-  const task = getTask(taskId);
+  const task = await getTaskStore().get(taskId);
 
   if (!task) {
     return new Response(JSON.stringify({ error: "Task not found", taskId }), {
@@ -60,7 +59,7 @@ export async function GET(
   let unsubscribe: (() => void) | undefined;
 
   const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
+    async start(controller) {
       const safeEnqueue = (chunk: Uint8Array): void => {
         if (closed) {
           return;
@@ -117,7 +116,7 @@ export async function GET(
       unsubscribe = eventBus.subscribe(taskId, liveListener);
 
       // 2. 先发一个轻量快照，让客户端立即知道当前状态
-      const current = getTask(taskId);
+      const current = await getTaskStore().get(taskId);
       safeEnqueue(
         frame(`snapshot-${taskId}`, "task.snapshot", {
           taskId,
@@ -128,7 +127,7 @@ export async function GET(
       );
 
       // 3. 回放已记录的历史事件（late join 也能看到已发生的事）
-      for (const event of getEvents(taskId)) {
+      for (const event of await getTaskStore().getEvents(taskId)) {
         writeEvent(event);
       }
 
@@ -140,8 +139,7 @@ export async function GET(
 
       // 5. 若任务在连接时已是终态：回放里已含终态事件并触发了 cleanup；
       //    这里兜底，防止终态事件因故未记录导致连接悬挂。
-      const latest = getTask(taskId);
-      if (latest && TERMINAL_EVENT_TYPES.has(statusToTerminalEvent(latest.status))) {
+      if (current && TERMINAL_EVENT_TYPES.has(statusToTerminalEvent(current.status))) {
         cleanup();
         return;
       }

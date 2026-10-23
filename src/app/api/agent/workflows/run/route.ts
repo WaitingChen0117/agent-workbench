@@ -28,7 +28,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const execution = createAndStartWorkflowTask({
+    const execution = await createAndStartWorkflowTask({
       definition: workflow,
       input: body?.input,
     });

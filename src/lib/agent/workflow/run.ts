@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { ToolSet } from "ai";
 
 import { streamAgent, MAX_AGENT_STEPS } from "@/lib/agent/loop";
-import * as store from "@/lib/agent/task/store";
+import { getTaskStore } from "@/lib/agent/task/task-store";
 import {
   emit,
   makeLoopEventHandler,
@@ -35,6 +35,8 @@ import type {
 function nowIso(): string {
   return new Date().toISOString();
 }
+
+const taskStore = getTaskStore();
 
 interface ExecutorContext {
   taskId: string;
@@ -107,7 +109,7 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
       });
 
       // 若审批被拒，permission gate 会把 task 置 cancelled 并中止
-      if (store.getTask(taskId)?.status === "cancelled") {
+      if ((await taskStore.get(taskId))?.status === "cancelled") {
         execution.status = "cancelled";
         throw new Error("tool approval rejected");
       }
@@ -128,8 +130,8 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
       const reason = String(node.config?.reason ?? "Workflow step requires approval");
       const { approval, decision } = createApproval(taskId, toolName, { reason });
 
-      if (store.getTask(taskId)?.status === "running") {
-        store.transitionTask(taskId, "waiting");
+      if ((await taskStore.get(taskId))?.status === "running") {
+        await taskStore.transition(taskId, "waiting");
       }
       emit(taskId, "approval.required", {
         approvalId: approval.id,
@@ -141,8 +143,8 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
       const status = await decision;
 
       if (status === "approved") {
-        if (store.getTask(taskId)?.status === "waiting") {
-          store.transitionTask(taskId, "running");
+        if ((await taskStore.get(taskId))?.status === "waiting") {
+          await taskStore.transition(taskId, "running");
         }
         emit(taskId, "approval.approved", { approvalId: approval.id, toolName });
         return "approved";
@@ -160,7 +162,7 @@ async function runWorkflowTask(
   execution: WorkflowExecution,
 ): Promise<void> {
   const taskId = execution.taskId;
-  store.transitionTask(taskId, "running");
+  await taskStore.transition(taskId, "running");
   emit(taskId, "task.started");
 
   const abortController = new AbortController();
@@ -185,22 +187,22 @@ async function runWorkflowTask(
     putExecution(execution);
 
     // Workflow 终态 → Task 终态（若尚未被 gate 终态化）
-    const current = store.getTask(taskId)?.status;
+    const current = (await taskStore.get(taskId))?.status;
     if (current === "running" || current === "waiting") {
       if (execution.status === "completed") {
-        store.updateTask(taskId, {
+        await taskStore.update(taskId, {
           answer: JSON.stringify(execution.context).slice(0, 4000),
         });
-        store.transitionTask(taskId, "completed");
+        await taskStore.transition(taskId, "completed");
         emit(taskId, "task.completed", { executionId: execution.executionId });
       } else if (execution.status === "cancelled") {
-        store.transitionTask(taskId, "cancelled");
+        await taskStore.transition(taskId, "cancelled");
         emit(taskId, "task.cancelled", { executionId: execution.executionId });
       } else {
-        store.updateTask(taskId, {
+        await taskStore.update(taskId, {
           error: execution.error ?? { code: "WORKFLOW_FAILED", message: "failed" },
         });
-        store.transitionTask(taskId, "failed");
+        await taskStore.transition(taskId, "failed");
         emit(taskId, "task.failed", execution.error);
       }
     }
@@ -212,8 +214,9 @@ async function runWorkflowTask(
     };
     execution.endedAt = nowIso();
     putExecution(execution);
-    if (store.getTask(taskId)?.status !== "failed" && store.getTask(taskId)?.status !== "cancelled" && store.getTask(taskId)?.status !== "completed") {
-      store.transitionTask(taskId, "failed");
+    const status = (await taskStore.get(taskId))?.status;
+    if (status !== "failed" && status !== "cancelled" && status !== "completed") {
+      await taskStore.transition(taskId, "failed");
       emit(taskId, "task.failed", execution.error);
     }
   }
@@ -222,12 +225,12 @@ async function runWorkflowTask(
 /**
  * 创建并启动一个 Workflow Task（异步）。立即返回 Execution，后台执行。
  */
-export function createAndStartWorkflowTask(input: {
+export async function createAndStartWorkflowTask(input: {
   definition: WorkflowDefinition;
   input?: unknown;
-}): WorkflowExecution {
+}): Promise<WorkflowExecution> {
   const { definition } = input;
-  const task = store.createTask({
+  const task = await taskStore.create({
     messages: [{ role: "user", content: `workflow:${definition.name}` }],
     maxSteps: definition.maxSteps ?? 100,
   });
