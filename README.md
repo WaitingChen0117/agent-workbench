@@ -14,11 +14,11 @@
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
-- **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。当前实现是进程内内存，接口已是异步，便于以后换成数据库。
+- **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。默认仍是进程内内存；设置 `AGENT_TASK_STORE=sqlite` 后写入 `.data/agent.sqlite`。重启时未完成的任务收成 failed，不会续跑或自动批准。
 
 ## 架构演进
 
-当前版本是 **v1.6.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.7.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -64,7 +64,11 @@ flowchart TB
   runtime --> store["TaskStore"]
   engine --> store
   getTask["GET /tasks/:taskId"] --> store
-  store --> memory["MemoryTaskStore"]
+  store -->|默认| memory["MemoryTaskStore"]
+  store -->|sqlite| sqlite["SQLiteTaskStore"]
+  sqlite --> db[".data/agent.sqlite"]
+  boot["进程启动"] --> recover["recoverTasks"]
+  recover --> store
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -84,6 +88,7 @@ flowchart TB
 | v1.4.0 GitHub MCP | 只读查看配置仓库、Issue 和 Pull Request；不能创建、修改、合并或 push |
 | v1.5.0 Git Push | 把本地分支推到 origin；先校验 remote 和分支，再人工审批；不能 force push |
 | v1.6.0 Task Persistence | 任务状态和事件经 TaskStore 读写；实现仍是进程内内存，重启后不保留 |
+| v1.7.0 SQLite | 可选把任务和事件写入 SQLite；重启后 running / waiting 收成 failed，不续跑、不自动批准 |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -142,6 +147,7 @@ pnpm git:write:evaluate  # Git 写入工具回归评估
 pnpm github:evaluate # GitHub 只读工具回归评估
 pnpm git:push:evaluate  # Git 推送回归评估
 pnpm task:persistence:evaluate  # 任务存储回归评估
+pnpm task:sqlite:evaluate  # SQLite 持久化与崩溃恢复评估
 ```
 
 ## 目录结构

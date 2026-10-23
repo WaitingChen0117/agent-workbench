@@ -16,3 +16,4 @@
 | [09-v1.4.0.md](09-v1.4.0.md) | v1.4.0 GitHub MCP | 查看配置好的仓库、Issue 和 Pull Request，不能改远端 |
 | [10-v1.5.0.md](10-v1.5.0.md) | v1.5.0 Git Push | 可以把本地分支推到 origin，但必须先校验再等人批准 |
 | [11-v1.6.0.md](11-v1.6.0.md) | v1.6.0 Task Persistence | 任务状态经 TaskStore 读写；当前仍是进程内内存 |
+| [12-v1.7.0.md](12-v1.7.0.md) | v1.7.0 SQLite | 可选把任务写入 SQLite；重启后未完成任务收成 failed，不续跑 |
