@@ -14,10 +14,11 @@
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
+- **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。当前实现是进程内内存，接口已是异步，便于以后换成数据库。
 
 ## 架构演进
 
-当前版本是 **v1.5.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.6.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -60,6 +61,10 @@ flowchart TB
   push --> origin["origin"]
   ghmcp --> gh["repo / issues / pulls"]
   gh --> api["api.github.com"]
+  runtime --> store["TaskStore"]
+  engine --> store
+  getTask["GET /tasks/:taskId"] --> store
+  store --> memory["MemoryTaskStore"]
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -78,6 +83,7 @@ flowchart TB
 | v1.3.0 Git 写入 | 暂存明确列出的文件并提交已暂存改动；写入先校验再审批，不能 push |
 | v1.4.0 GitHub MCP | 只读查看配置仓库、Issue 和 Pull Request；不能创建、修改、合并或 push |
 | v1.5.0 Git Push | 把本地分支推到 origin；先校验 remote 和分支，再人工审批；不能 force push |
+| v1.6.0 Task Persistence | 任务状态和事件经 TaskStore 读写；实现仍是进程内内存，重启后不保留 |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -135,6 +141,7 @@ pnpm git:evaluate    # Git 只读工具回归评估
 pnpm git:write:evaluate  # Git 写入工具回归评估
 pnpm github:evaluate # GitHub 只读工具回归评估
 pnpm git:push:evaluate  # Git 推送回归评估
+pnpm task:persistence:evaluate  # 任务存储回归评估
 ```
 
 ## 目录结构
