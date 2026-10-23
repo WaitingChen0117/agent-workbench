@@ -8,37 +8,16 @@
 
 ```mermaid
 flowchart TB
-  editor["Workflow Editor"]
-  json["Workflow JSON"]
-  engine["Workflow Engine"]
-  agent["Agent"]
-  tool["Tool"]
-  condition["Condition"]
-  runtime["Task Runtime"]
-  mcp["MCP"]
-  skills["Skills"]
-  approval["Approval"]
-  trace["Trace"]
-
-  editor --> json --> engine
-  engine --> agent
-  engine --> tool
-  engine --> condition
-  agent --> runtime
-  tool --> runtime
-  condition --> runtime
-  runtime --> mcp
-  runtime --> skills
-  runtime --> approval
-  mcp --> trace
-  skills --> trace
-  approval --> trace
-
-  classDef missing stroke-dasharray: 5 5
-  class editor,json,engine,agent,tool,condition,runtime,mcp,skills,approval,trace missing
+  user["用户消息"] --> chat["Chat API"]
+  chat --> rewrite["按需改写查询"]
+  rewrite --> rag["RAG 检索"]
+  rag --> llm["LLM"]
+  llm --> out["流式回答"]
+  ingest["上传 / 分块 / 向量化"] --> store["知识库索引"]
+  store --> rag
 ```
 
-本版一层都还没有点亮。实际在跑的是 Chat → RAG → LLM：服务端自己检索，再让模型回答。
+这就是当时的全部路径。服务端自己检索，再让模型回答。还没有 Agent。
 
 ### 相对上一版
 

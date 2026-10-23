@@ -1,42 +1,6 @@
 # Agent 架构演进
 
-每一份文档都包含同一张完整架构。实线是该版本已经有的层，虚线是该版本还没有的层。Workflow Editor、Workflow JSON、Workflow Engine、Condition 到 v1.0.0 仍未实现。
-
-虚线是还没有对应代码的层。实线是 v1.0.0 已经有的层。
-
-```mermaid
-flowchart TB
-  editor["Workflow Editor"]
-  json["Workflow JSON"]
-  engine["Workflow Engine"]
-  agent["Agent"]
-  tool["Tool"]
-  condition["Condition"]
-  runtime["Task Runtime"]
-  mcp["MCP"]
-  skills["Skills"]
-  approval["Approval"]
-  trace["Trace"]
-
-  editor --> json --> engine
-  engine --> agent
-  engine --> tool
-  engine --> condition
-  agent --> runtime
-  tool --> runtime
-  condition --> runtime
-  runtime --> mcp
-  runtime --> skills
-  runtime --> approval
-  mcp --> trace
-  skills --> trace
-  approval --> trace
-
-  classDef missing stroke-dasharray: 5 5
-  class editor,json,engine,condition missing
-```
-
-v0.8.0 之前没有单独版本号，按代码里的阶段命名；从 v0.8.0 起与 CHANGELOG 一致。`/api/chat` 的检索后回答路径一直保留，不在这张图里。
+每一份文档画的是**该版本当时的完整架构**：当时已经存在的入口、调用关系和保留下来的旧路径都在图里。后一版不会提前出现。v0.8.0 之前没有单独版本号，按代码里的阶段命名；从 v0.8.0 起与 CHANGELOG 一致。
 
 | 文件 | 版本 | 这一版让 Agent 多了什么 |
 | --- | --- | --- |

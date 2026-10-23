@@ -8,37 +8,18 @@
 
 ```mermaid
 flowchart TB
-  editor["Workflow Editor"]
-  json["Workflow JSON"]
-  engine["Workflow Engine"]
-  agent["Agent"]
-  tool["Tool"]
-  condition["Condition"]
-  runtime["Task Runtime"]
-  mcp["MCP"]
-  skills["Skills"]
-  approval["Approval"]
-  trace["Trace"]
-
-  editor --> json --> engine
-  engine --> agent
-  engine --> tool
-  engine --> condition
-  agent --> runtime
-  tool --> runtime
-  condition --> runtime
-  runtime --> mcp
-  runtime --> skills
-  runtime --> approval
-  mcp --> trace
-  skills --> trace
-  approval --> trace
-
-  classDef missing stroke-dasharray: 5 5
-  class editor,json,engine,condition,runtime,mcp,skills,approval,trace missing
+  user["用户"] --> chat["Chat API"]
+  user --> agent["Agent"]
+  chat --> rewrite["按需改写查询"]
+  rewrite --> rag["RAG"]
+  rag --> llm["LLM"]
+  agent --> tool["Tool"]
+  tool --> sk["searchKnowledge"]
+  tool --> time["getCurrentTime"]
+  sk --> rag
 ```
 
-本版点亮 Agent 和 Tool。Agent 决定要不要调用 Tool；Tool 只有 `searchKnowledge` 和 `getCurrentTime`。没有 Task Runtime，一次调用结束就结束。
+对话路径原样保留。新的 Agent 路径由模型决定是否调用 Tool；检索仍然走原来的 RAG，只是调用者从服务端换成了工具。一次调用结束即结束，没有任务可回查。
 
 ### 从基线转变了什么
 

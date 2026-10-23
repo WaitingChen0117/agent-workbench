@@ -14,41 +14,31 @@
 
 ## 架构演进
 
-当前版本是 **v1.0.0**。虚线是目标结构里还没有代码的层。
+当前版本是 **v1.0.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
-  editor["Workflow Editor"]
-  json["Workflow JSON"]
-  engine["Workflow Engine"]
-  agent["Agent"]
-  tool["Tool"]
-  condition["Condition"]
-  runtime["Task Runtime"]
-  mcp["MCP"]
-  skills["Skills"]
-  approval["Approval"]
-  trace["Trace"]
-
-  editor --> json --> engine
-  engine --> agent
-  engine --> tool
-  engine --> condition
-  agent --> runtime
-  tool --> runtime
-  condition --> runtime
-  runtime --> mcp
-  runtime --> skills
-  runtime --> approval
-  mcp --> trace
-  skills --> trace
-  approval --> trace
-
-  classDef missing stroke-dasharray: 5 5
-  class editor,json,engine,condition missing
+  user["用户"] --> chat["Chat API"]
+  user --> post["POST /api/agent"]
+  chat --> rag["RAG"] --> llm["LLM"]
+  post --> runtime["Task Runtime"]
+  runtime --> skills["Skills"]
+  skills --> agent["Agent"]
+  runtime --> agent
+  agent --> gate{"权限"}
+  gate -->|只读| resolver["Tool Resolver"]
+  gate -->|写或执行| approval["Approval"]
+  approval -->|批准| resolver
+  approval -->|拒绝| cancel["任务取消"]
+  resolver --> local["本地 Tool"]
+  resolver --> mcp["MCP"]
+  local --> rag
+  mcp --> fs["读文件 / writeFile / runCommand"]
+  agent --> bus["Event Bus"]
+  bus --> sse["SSE"]
+  bus --> trace["Trace"]
+  trace --> eval["指标与评估"]
 ```
-
-各版实际叠了哪些层，见 [docs/architecture](docs/architecture/README.md)。
 
 | 版本 | 新增 |
 | --- | --- |
