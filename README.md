@@ -12,12 +12,12 @@
 - **Coding Agent**：`writeFile` 和 `runCommand` 必须先经过人工审批。
 - **Trace**：任务结束后仍可查看步骤、工具、审批和指标，并用 `pnpm agent:evaluate` 做回归。
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
-- **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd` 与 `gitCommit` 必须先过前置校验，再等人批准。
+- **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
 
 ## 架构演进
 
-当前版本是 **v1.4.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.5.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -44,7 +44,7 @@ flowchart TB
   toolNode --> gate
   gate -->|只读| resolver["Tool Resolver"]
   gate -->|写或执行| guard{"前置校验"}
-  guard -->|敏感路径 / 非法 message| denied["DENIED，不建审批"]
+  guard -->|非法路径 / message / 分支| denied["DENIED，不建审批"]
   guard -->|通过| approval["Approval"]
   approval -->|批准| resolver
   approval -->|拒绝| cancel["任务取消"]
@@ -56,6 +56,8 @@ flowchart TB
   fsmcp --> files["读 / 写 / 命令"]
   gitmcp --> gitRead["status / diff / log / branch / show"]
   gitmcp --> gitWrite["add / commit"]
+  gitmcp --> push["push origin"]
+  push --> origin["origin"]
   ghmcp --> gh["repo / issues / pulls"]
   gh --> api["api.github.com"]
   runtime --> bus["Event Bus"]
@@ -75,6 +77,7 @@ flowchart TB
 | v1.2.0 Git MCP | 只读查看仓库状态、差异、日志、分支和提交；不能 add、commit 或 push |
 | v1.3.0 Git 写入 | 暂存明确列出的文件并提交已暂存改动；写入先校验再审批，不能 push |
 | v1.4.0 GitHub MCP | 只读查看配置仓库、Issue 和 Pull Request；不能创建、修改、合并或 push |
+| v1.5.0 Git Push | 把本地分支推到 origin；先校验 remote 和分支，再人工审批；不能 force push |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -131,6 +134,7 @@ pnpm workflow:evaluate  # Workflow 回归评估
 pnpm git:evaluate    # Git 只读工具回归评估
 pnpm git:write:evaluate  # Git 写入工具回归评估
 pnpm github:evaluate # GitHub 只读工具回归评估
+pnpm git:push:evaluate  # Git 推送回归评估
 ```
 
 ## 目录结构
