@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { assertTransition } from "@/lib/agent/task/state-machine";
+import { SQLiteTaskStore } from "@/lib/agent/task/sqlite-task-store";
 import type {
   AgentTask,
   AgentTaskEvent,
@@ -127,8 +128,22 @@ export class MemoryTaskStore implements TaskStore {
   }
 }
 
-// 单例：同一进程唯一的 TaskStore（挂 globalThis 兼容 HMR）
+// 单例：同一进程唯一的 TaskStore（挂 globalThis 兼容 HMR）。
+// Store 选择只发生在这里，Runtime 不感知 memory / sqlite。
 export function getTaskStore(): TaskStore {
-  return globalRef.__agentTaskStore ??
-    (globalRef.__agentTaskStore = new MemoryTaskStore());
+  if (globalRef.__agentTaskStore) {
+    return globalRef.__agentTaskStore;
+  }
+
+  let store: TaskStore;
+  if (process.env.AGENT_TASK_STORE === "sqlite") {
+    const dbPath =
+      process.env.AGENT_TASK_DB_PATH ?? `${process.cwd()}/.data/agent.sqlite`;
+    store = new SQLiteTaskStore(dbPath);
+  } else {
+    store = new MemoryTaskStore();
+  }
+
+  globalRef.__agentTaskStore = store;
+  return store;
 }

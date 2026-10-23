@@ -59,7 +59,8 @@ export type AgentTaskEventType =
   | "workflow.failed"
   | "task.completed"
   | "task.failed"
-  | "task.cancelled";
+  | "task.cancelled"
+  | "task.recovered";
 
 export interface AgentTaskEvent {
   id: string;

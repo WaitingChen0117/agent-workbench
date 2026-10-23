@@ -1,6 +1,6 @@
 {
   "name": "agent-workbench",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -15,7 +15,8 @@
     "git:write:evaluate": "tsx --env-file=.env.local scripts/git-write-evaluate.ts",
     "github:evaluate": "tsx --env-file=.env.local scripts/github-evaluate.ts",
     "git:push:evaluate": "tsx --env-file=.env.local scripts/git-push-evaluate.ts",
-    "task:persistence:evaluate": "tsx --env-file=.env.local scripts/task-persistence-evaluate.ts"
+    "task:persistence:evaluate": "tsx --env-file=.env.local scripts/task-persistence-evaluate.ts",
+    "task:sqlite:evaluate": "tsx --env-file=.env.local scripts/task-sqlite-evaluate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.92",

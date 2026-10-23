@@ -1,0 +1,16 @@
+{
+  "cases": [
+    { "id": "sqlite-create", "kind": "create" },
+    { "id": "sqlite-update", "kind": "update" },
+    { "id": "sqlite-transition", "kind": "transition" },
+    { "id": "sqlite-invalid-transition", "kind": "invalid-transition" },
+    { "id": "sqlite-events", "kind": "events" },
+    { "id": "sqlite-event-order", "kind": "event-order" },
+    { "id": "sqlite-restart-persistence", "kind": "cross-process-create" },
+    { "id": "recovery-running", "kind": "recovery-running" },
+    { "id": "recovery-waiting", "kind": "recovery-waiting" },
+    { "id": "recovery-idempotent", "kind": "recovery-idempotent" },
+    { "id": "runtime-sqlite", "kind": "cross-process-run" },
+    { "id": "stream-replay-sqlite", "kind": "replay" }
+  ]
+}

@@ -15,6 +15,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.7.0] - 2026-10-23 — SQLite Task Persistence + Crash Recovery
+
+### Added
+
+- `SQLiteTaskStore` (based on Node built-in `node:sqlite`, no extra dependency).
+- SQLite schema: `agent_tasks` + `agent_task_events` (PRIMARY KEY(task_id, sequence) for strictly increasing event order).
+- Task/Event persistence across process restarts.
+- Memory/SQLite store selection via `AGENT_TASK_STORE` (+ `AGENT_TASK_DB_PATH`), resolved inside `getTaskStore()`.
+- Task Resume / Crash Recovery (`recoverTasks` / `initializeAgentRuntime`) + Next instrumentation hook.
+- `task.recovered` event.
+- SQLite persistence & recovery evaluation (`data/task-sqlite-evaluation.json`) and the `task:sqlite:evaluate` CLI (with real cross-process verification).
+
+### Changed
+
+- `TaskStore` now has a real persistent backend; Runtime uses SQLite only via `getTaskStore()` (no memory/sqlite branching in Runtime).
+- SSE replay reads events from the persistent Event Store, still ordered by sequence.
+- Task lifecycle remains managed solely through the Store; `transition` stays atomic (SQLite transaction) and goes through the existing state machine.
+
+### Security
+
+- Recovery never re-executes a `running` task (no duplicate side effects) — it is safely ended as `failed`.
+- `waiting`/approval tasks are never auto-approved after restart; they are safely ended as `failed` ("Approval state lost after process restart").
+- Persisted data follows existing sanitize rules (events are sanitized upstream before storage); no tokens/credentials written to SQLite.
+
 ## [1.6.0] - 2026-10-23 — Task Persistence
 
 ### Added
