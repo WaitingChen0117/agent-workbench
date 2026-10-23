@@ -6,10 +6,9 @@
 
 `/api/chat` 的检索后回答路径保留，不改成 Agent。
 
-```text
-              Agent
-               ↓
-              Tool
+```mermaid
+flowchart TB
+  agent["Agent"] --> tool["Tool"]
 ```
 
 本版新加的层是 Agent 和 Tool。Agent 决定要不要往下调用 Tool；Tool 只有 `searchKnowledge` 和 `getCurrentTime`。没有 Task Runtime，一次调用结束就结束。

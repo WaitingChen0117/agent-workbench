@@ -6,12 +6,9 @@
 
 本地工具函数（知识库检索、当前时间）这时已经作为库代码存在，但调用方是服务端，不是模型。
 
-```text
-              Chat
-               ↓
-              RAG
-               ↓
-              LLM
+```mermaid
+flowchart TB
+  chat["Chat"] --> rag["RAG"] --> llm["LLM"]
 ```
 
 还没有 Agent、Tool、Task Runtime。服务端自己走完这三层。

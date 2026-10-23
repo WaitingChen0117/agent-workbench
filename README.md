@@ -14,19 +14,41 @@
 
 ## 架构演进
 
-当前版本是 **v1.0.0**。分层从上到下是：
+当前版本是 **v1.0.0**。虚线是目标结构里还没有代码的层。
 
-```text
-           Agent          Tool
-                ↓
-           Task Runtime
-                ↓
-      MCP      Skills     Approval
-                ↓
-              Trace
+```mermaid
+flowchart TB
+  editor["Workflow Editor"]
+  json["Workflow JSON"]
+  engine["Workflow Engine"]
+  agent["Agent"]
+  tool["Tool"]
+  condition["Condition"]
+  runtime["Task Runtime"]
+  mcp["MCP"]
+  skills["Skills"]
+  approval["Approval"]
+  trace["Trace"]
+
+  editor --> json --> engine
+  engine --> agent
+  engine --> tool
+  engine --> condition
+  agent --> runtime
+  tool --> runtime
+  condition --> runtime
+  runtime --> mcp
+  runtime --> skills
+  runtime --> approval
+  mcp --> trace
+  skills --> trace
+  approval --> trace
+
+  classDef missing stroke-dasharray: 5 5
+  class editor,json,engine,condition missing
 ```
 
-每一版只往这张图里加层，不替换原有路径。各版的图和相对上一版的变化见 [docs/architecture](docs/architecture/README.md)。
+各版实际叠了哪些层，见 [docs/architecture](docs/architecture/README.md)。
 
 | 版本 | 新增 |
 | --- | --- |

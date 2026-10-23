@@ -1,20 +1,42 @@
 # Agent 架构演进
 
-每一份文档先给这一版的分层，再写相对上一版多了哪一层，最后写工作流。层是从上往下叠的：Agent 和 Tool 在上，Task Runtime 负责跑任务，MCP、Skills、Approval 是运行时用到的能力，Trace 在最下面记录结果。
+每一份文档先给这一版的分层，再写相对上一版多了哪一层，最后写工作流。目标结构从上到下是：工作流定义、执行入口、Agent / Tool / Condition、Task Runtime、MCP / Skills / Approval，最底下是 Trace。
 
-当前实现到 v1.0.0，结构是：
+虚线是还没有对应代码的层。实线是 v1.0.0 已经有的层。
 
-```text
-           Agent          Tool
-                ↓
-           Task Runtime
-                ↓
-      MCP      Skills     Approval
-                ↓
-              Trace
+```mermaid
+flowchart TB
+  editor["Workflow Editor"]
+  json["Workflow JSON"]
+  engine["Workflow Engine"]
+  agent["Agent"]
+  tool["Tool"]
+  condition["Condition"]
+  runtime["Task Runtime"]
+  mcp["MCP"]
+  skills["Skills"]
+  approval["Approval"]
+  trace["Trace"]
+
+  editor --> json --> engine
+  engine --> agent
+  engine --> tool
+  engine --> condition
+  agent --> runtime
+  tool --> runtime
+  condition --> runtime
+  runtime --> mcp
+  runtime --> skills
+  runtime --> approval
+  mcp --> trace
+  skills --> trace
+  approval --> trace
+
+  classDef missing stroke-dasharray: 5 5
+  class editor,json,engine,condition missing
 ```
 
-Workflow Editor、Workflow JSON、Workflow Engine、Condition 还没有对应代码，所以没有画进去。v0.8.0 之前没有单独版本号，按代码里的阶段命名；从 v0.8.0 起与 CHANGELOG 一致。`/api/chat` 的检索后回答路径一直保留，不在这张 Agent 图里。
+v0.8.0 之前没有单独版本号，按代码里的阶段命名；从 v0.8.0 起与 CHANGELOG 一致。`/api/chat` 的检索后回答路径一直保留，不在这张图里。
 
 | 文件 | 版本 | 这一版让 Agent 多了什么 |
 | --- | --- | --- |
