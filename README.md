@@ -13,10 +13,11 @@
 - **Trace**：任务结束后仍可查看步骤、工具、审批和指标，并用 `pnpm agent:evaluate` 做回归。
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行；用 `pnpm workflow:evaluate` 做回归。
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd` 与 `gitCommit` 必须先过前置校验，再等人批准。
+- **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
 
 ## 架构演进
 
-当前版本是 **v1.3.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.4.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -50,10 +51,13 @@ flowchart TB
   resolver --> local["本地 Tool"]
   resolver --> fsmcp["Filesystem MCP"]
   resolver --> gitmcp["Git MCP"]
+  resolver --> ghmcp["GitHub MCP"]
   local --> rag
   fsmcp --> files["读 / 写 / 命令"]
   gitmcp --> gitRead["status / diff / log / branch / show"]
   gitmcp --> gitWrite["add / commit"]
+  ghmcp --> gh["repo / issues / pulls"]
+  gh --> api["api.github.com"]
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -70,6 +74,7 @@ flowchart TB
 | v1.1.0 Workflow | 校验通过的有向无环图可在任务内执行；节点为 Agent、Tool、Condition、Approval、End |
 | v1.2.0 Git MCP | 只读查看仓库状态、差异、日志、分支和提交；不能 add、commit 或 push |
 | v1.3.0 Git 写入 | 暂存明确列出的文件并提交已暂存改动；写入先校验再审批，不能 push |
+| v1.4.0 GitHub MCP | 只读查看配置仓库、Issue 和 Pull Request；不能创建、修改、合并或 push |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -125,6 +130,7 @@ pnpm agent:evaluate  # Agent Trace 回归评估
 pnpm workflow:evaluate  # Workflow 回归评估
 pnpm git:evaluate    # Git 只读工具回归评估
 pnpm git:write:evaluate  # Git 写入工具回归评估
+pnpm github:evaluate # GitHub 只读工具回归评估
 ```
 
 ## 目录结构
