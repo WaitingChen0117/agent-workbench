@@ -53,3 +53,6 @@ coding
   gitCommit 不会自动 add。
 - 不要用 `.` / `-A` 批量暂存，必须明确列出文件；敏感文件不可暂存。
 - GitHub push / pull / reset / checkout 不属于当前能力，不要尝试。
+- GitHub（只读）：可用 githubRepo / githubIssues / githubIssue / githubPullRequests /
+  githubPullRequest 查询仓库信息、Issue、Pull Request；GitHub MCP 当前只读，
+  不得创建/修改 Issue、不得创建/合并/评论/审查 PR、不得 push，也不要尝试任何写操作。

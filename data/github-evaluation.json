@@ -1,0 +1,15 @@
+{
+  "cases": [
+    { "id": "github-repo", "kind": "live-call", "tool": "githubRepo", "input": {}, "field": "repo" },
+    { "id": "github-issues", "kind": "live-call", "tool": "githubIssues", "input": { "limit": 5 }, "arrayKey": "issues" },
+    { "id": "github-issue", "kind": "live-number", "tool": "githubIssue", "numberEnv": "GITHUB_ISSUE_NUMBER", "field": "issue" },
+    { "id": "github-pulls", "kind": "live-call", "tool": "githubPullRequests", "input": { "limit": 5 }, "arrayKey": "pullRequests" },
+    { "id": "github-pull", "kind": "live-number", "tool": "githubPullRequest", "numberEnv": "GITHUB_PR_NUMBER", "field": "pullRequest" },
+    { "id": "github-issue-limit", "kind": "clamp" },
+    { "id": "github-issues-filter-pr", "kind": "filter-pr" },
+    { "id": "github-body-truncate", "kind": "truncate" },
+    { "id": "github-token-sanitize", "kind": "sanitize" },
+    { "id": "github-agent-read", "kind": "agent" },
+    { "id": "github-no-token", "kind": "no-token" }
+  ]
+}

@@ -20,6 +20,7 @@ const WORKSPACE_ROOT = process.cwd();
 const MCP_SERVERS: Array<{ name: string; script: string }> = [
   { name: "filesystem", script: path.join("src", "lib", "mcp", "filesystem", "server.ts") },
   { name: "git", script: path.join("src", "lib", "mcp", "git", "server.ts") },
+  { name: "github", script: path.join("src", "lib", "mcp", "github", "server.ts") },
 ];
 
 const globalRef = globalThis as typeof globalThis & {

@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.4.0] - 2026-10-23 — GitHub Read-only MCP
+
+### Added
+
+- `github-mcp` Server (stdio, remote GitHub REST API client).
+- `githubRepo`, `githubIssues`, `githubIssue`, `githubPullRequests`, `githubPullRequest` (all read-only).
+- GitHub MCP Evaluation (`data/github-evaluation.json`) and the `github:evaluate` CLI.
+- GitHub read-only Agent integration (Coding Skill updated).
+
+### Changed
+
+- MCP Client now supports filesystem + git + github servers (independent lazy singletons).
+- Tool Resolver automatically exposes GitHub tools alongside local/filesystem/git tools.
+- Coding Skill documents GitHub read-only capabilities.
+
+### Security
+
+- GitHub MCP is read-only (no create/merge/comment/review/push).
+- GitHub API access restricted to api.github.com; no arbitrary HTTP / fetchUrl.
+- Tool input is structured (owner/repo from env, number validated); no user-supplied URLs.
+- `GITHUB_TOKEN` is used only in the Authorization header and never enters tool input/output, trace, events, approvals, prompts, or logs.
+- Issue/PR body length limits; missing token fails gracefully (success:false) without crashing /api/agent.
+
 ## [1.3.0] - 2026-10-23 — Git Write MCP
 
 ### Added

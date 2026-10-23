@@ -24,6 +24,13 @@ const TOOL_POLICY: Record<string, ToolPermission> = {
   gitBranch: "allow",
   gitShow: "allow",
 
+  // GitHub 只读工具 → 允许（无需审批）
+  githubRepo: "allow",
+  githubIssues: "allow",
+  githubIssue: "allow",
+  githubPullRequests: "allow",
+  githubPullRequest: "allow",
+
   // 有副作用 → 需要人工审批
   writeFile: "approval_required",
   runCommand: "approval_required",
