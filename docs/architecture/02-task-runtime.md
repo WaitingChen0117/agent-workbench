@@ -6,10 +6,37 @@ Agent Loop 仍然负责「模型和工具怎么交替」。这一版在它外面
 
 ```mermaid
 flowchart TB
-  agent["Agent"] --> tool["Tool"] --> runtime["Task Runtime"]
+  editor["Workflow Editor"]
+  json["Workflow JSON"]
+  engine["Workflow Engine"]
+  agent["Agent"]
+  tool["Tool"]
+  condition["Condition"]
+  runtime["Task Runtime"]
+  mcp["MCP"]
+  skills["Skills"]
+  approval["Approval"]
+  trace["Trace"]
+
+  editor --> json --> engine
+  engine --> agent
+  engine --> tool
+  engine --> condition
+  agent --> runtime
+  tool --> runtime
+  condition --> runtime
+  runtime --> mcp
+  runtime --> skills
+  runtime --> approval
+  mcp --> trace
+  skills --> trace
+  approval --> trace
+
+  classDef missing stroke-dasharray: 5 5
+  class editor,json,engine,condition,mcp,skills,approval,trace missing
 ```
 
-本版新加的层是 Task Runtime。它包住上一版的 Agent 和 Tool：先记下任务，再驱动循环，结束后用 task id 还能读到状态和答案。
+本版新点亮 Task Runtime。它包住已有的 Agent 和 Tool：先记下任务，再驱动循环，结束后用 task id 还能读到状态和答案。
 
 状态只允许这些转换：
 

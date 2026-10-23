@@ -1,6 +1,6 @@
 # Agent 架构演进
 
-每一份文档先给这一版的分层，再写相对上一版多了哪一层，最后写工作流。目标结构从上到下是：工作流定义、执行入口、Agent / Tool / Condition、Task Runtime、MCP / Skills / Approval，最底下是 Trace。
+每一份文档都包含同一张完整架构。实线是该版本已经有的层，虚线是该版本还没有的层。Workflow Editor、Workflow JSON、Workflow Engine、Condition 到 v1.0.0 仍未实现。
 
 虚线是还没有对应代码的层。实线是 v1.0.0 已经有的层。
 

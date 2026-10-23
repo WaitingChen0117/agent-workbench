@@ -8,10 +8,37 @@
 
 ```mermaid
 flowchart TB
-  chat["Chat"] --> rag["RAG"] --> llm["LLM"]
+  editor["Workflow Editor"]
+  json["Workflow JSON"]
+  engine["Workflow Engine"]
+  agent["Agent"]
+  tool["Tool"]
+  condition["Condition"]
+  runtime["Task Runtime"]
+  mcp["MCP"]
+  skills["Skills"]
+  approval["Approval"]
+  trace["Trace"]
+
+  editor --> json --> engine
+  engine --> agent
+  engine --> tool
+  engine --> condition
+  agent --> runtime
+  tool --> runtime
+  condition --> runtime
+  runtime --> mcp
+  runtime --> skills
+  runtime --> approval
+  mcp --> trace
+  skills --> trace
+  approval --> trace
+
+  classDef missing stroke-dasharray: 5 5
+  class editor,json,engine,agent,tool,condition,runtime,mcp,skills,approval,trace missing
 ```
 
-还没有 Agent、Tool、Task Runtime。服务端自己走完这三层。
+本版一层都还没有点亮。实际在跑的是 Chat → RAG → LLM：服务端自己检索，再让模型回答。
 
 ### 相对上一版
 

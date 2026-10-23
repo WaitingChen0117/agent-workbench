@@ -8,10 +8,37 @@
 
 ```mermaid
 flowchart TB
-  agent["Agent"] --> tool["Tool"]
+  editor["Workflow Editor"]
+  json["Workflow JSON"]
+  engine["Workflow Engine"]
+  agent["Agent"]
+  tool["Tool"]
+  condition["Condition"]
+  runtime["Task Runtime"]
+  mcp["MCP"]
+  skills["Skills"]
+  approval["Approval"]
+  trace["Trace"]
+
+  editor --> json --> engine
+  engine --> agent
+  engine --> tool
+  engine --> condition
+  agent --> runtime
+  tool --> runtime
+  condition --> runtime
+  runtime --> mcp
+  runtime --> skills
+  runtime --> approval
+  mcp --> trace
+  skills --> trace
+  approval --> trace
+
+  classDef missing stroke-dasharray: 5 5
+  class editor,json,engine,condition,runtime,mcp,skills,approval,trace missing
 ```
 
-本版新加的层是 Agent 和 Tool。Agent 决定要不要往下调用 Tool；Tool 只有 `searchKnowledge` 和 `getCurrentTime`。没有 Task Runtime，一次调用结束就结束。
+本版点亮 Agent 和 Tool。Agent 决定要不要调用 Tool；Tool 只有 `searchKnowledge` 和 `getCurrentTime`。没有 Task Runtime，一次调用结束就结束。
 
 ### 从基线转变了什么
 
