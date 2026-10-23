@@ -4,7 +4,7 @@ import path from "node:path";
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import { createAndRunTask, createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { resolveApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 
 const ROOT = process.cwd();
 const store = getTaskStore();
@@ -106,7 +106,7 @@ async function runCase(kind: string): Promise<Check[]> {
           if (e.type === "approval.required") {
             void store.get(task.id).then((t) => {
               if (t?.status === "waiting") sawWaiting = true;
-              resolveApproval((e.data as { approvalId: string }).approvalId, "approve");
+              void applyApprovalDecision(task.id, (e.data as { approvalId: string }).approvalId, "approve");
             });
           }
           if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {

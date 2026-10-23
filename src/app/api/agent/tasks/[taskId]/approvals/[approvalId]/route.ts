@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { getTaskStore } from "@/lib/agent/task/task-store";
-import { getApproval, resolveApproval } from "@/lib/agent/approvals";
+import { getApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 
 export const runtime = "nodejs";
 
@@ -26,7 +27,7 @@ export async function POST(
     );
   }
 
-  const approval = getApproval(approvalId);
+  const approval = await getApproval(approvalId);
 
   if (!approval || approval.taskId !== taskId) {
     return NextResponse.json(
@@ -52,11 +53,18 @@ export async function POST(
     );
   }
 
-  const resolved = resolveApproval(approvalId, action);
+  const result = await applyApprovalDecision(taskId, approvalId, action);
+
+  if (!result.ok) {
+    return NextResponse.json(
+      { error: result.reason ?? "Failed to apply decision", approvalId },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({
     id: approvalId,
     taskId,
-    status: resolved?.status,
+    status: result.status,
   });
 }

@@ -45,7 +45,7 @@ export async function GET(
     );
   }
 
-  const approvals = listApprovals(taskId).map(sanitize);
+  const approvals = (await listApprovals(taskId)).map(sanitize);
   const pending = approvals.filter((a) => a.status === "pending");
 
   return NextResponse.json({ taskId, pending, approvals });

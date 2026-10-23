@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { resolveApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getTraceByTask } from "@/lib/agent/trace/store";
 import { computeMetrics } from "@/lib/agent/trace/metrics";
@@ -52,7 +52,7 @@ async function driveTask(content: string, maxSteps: number): Promise<DriveResult
         toolNames.push((e.data as { tool: string }).tool);
       }
       if (e.type === "approval.required") {
-        resolveApproval((e.data as { approvalId: string }).approvalId, "approve");
+        void applyApprovalDecision(task.id, (e.data as { approvalId: string }).approvalId, "approve");
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();

@@ -5,7 +5,7 @@ import { validateWorkflow } from "@/lib/agent/workflow/validator";
 import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
 import { getExecution } from "@/lib/agent/workflow/execution-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { resolveApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import type { WorkflowDefinition } from "@/lib/agent/workflow/types";
 
 const ROOT = process.cwd();
@@ -31,7 +31,7 @@ async function runWorkflowCase(c: WfCase): Promise<{ status: string | undefined;
   return new Promise((resolve) => {
     const unsub = eventBus.subscribe(execution.taskId, (e) => {
       if (e.type === "approval.required") {
-        resolveApproval((e.data as { approvalId: string }).approvalId, c.mode === "reject" ? "reject" : "approve");
+        void applyApprovalDecision(execution.taskId, (e.data as { approvalId: string }).approvalId, c.mode === "reject" ? "reject" : "approve");
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();

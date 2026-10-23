@@ -1,0 +1,16 @@
+{
+  "cases": [
+    { "id": "approval-create", "kind": "approval-create" },
+    { "id": "approval-restart-persistence", "kind": "approval-restart-persistence" },
+    { "id": "approval-approve-persist", "kind": "approval-approve-persist" },
+    { "id": "approval-reject-persist", "kind": "approval-reject-persist" },
+    { "id": "approval-invalid-transition", "kind": "approval-invalid-transition" },
+    { "id": "approval-idempotent", "kind": "approval-idempotent" },
+    { "id": "recovery-waiting-approval", "kind": "recovery-waiting-approval" },
+    { "id": "recovery-missing-approval", "kind": "recovery-missing-approval" },
+    { "id": "resume-writeFile", "kind": "resume-writeFile" },
+    { "id": "resume-gitAdd", "kind": "resume-gitAdd" },
+    { "id": "resume-workflow", "kind": "resume-workflow" },
+    { "id": "resume-no-duplicate-side-effect", "kind": "resume-no-duplicate-side-effect" }
+  ]
+}

@@ -128,7 +128,7 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
     async runApprovalNode(node: WorkflowNode) {
       const toolName = String(node.config?.toolName ?? "workflow");
       const reason = String(node.config?.reason ?? "Workflow step requires approval");
-      const { approval, decision } = createApproval(taskId, toolName, { reason });
+      const { approval, decision } = await createApproval(taskId, toolName, { reason });
 
       if ((await taskStore.get(taskId))?.status === "running") {
         await taskStore.transition(taskId, "waiting");

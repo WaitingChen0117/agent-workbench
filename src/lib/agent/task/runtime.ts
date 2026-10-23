@@ -15,7 +15,11 @@ import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
 import { getToolPermission } from "@/lib/agent/permission";
 import { preApprovalGuard } from "@/lib/agent/guard";
-import { createApproval } from "@/lib/agent/approvals";
+import { createApproval, resolveApprovalState } from "@/lib/agent/approvals";
+import {
+  getApprovalStore,
+  type AgentApproval,
+} from "@/lib/agent/approval/approval-store";
 import { startTrace } from "@/lib/agent/trace/collector";
 import {
   sanitizeToolInput,
@@ -194,7 +198,7 @@ export function wrapToolsWithPermissions(
         return { success: false, error: `DENIED: ${guard.error}` };
       }
 
-      const { approval, decision } = createApproval(ctx.taskId, name, input);
+      const { approval, decision } = await createApproval(ctx.taskId, name, input);
 
       if ((await taskStore.get(ctx.taskId))?.status === "running") {
         await taskStore.transition(ctx.taskId, "waiting");
@@ -206,24 +210,17 @@ export function wrapToolsWithPermissions(
         input: summarizeInput(name, input),
       });
 
+      // approval.approved / approval.rejected 由 applyApprovalDecision 统一发布
       const status = await decision;
 
       if (status === "approved") {
         if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
           await taskStore.transition(ctx.taskId, "running");
         }
-        emit(ctx.taskId, "approval.approved", {
-          approvalId: approval.id,
-          toolName: name,
-        });
         return originalExecute(input, options);
       }
 
       // rejected：取消任务并中止 Agent Loop
-      emit(ctx.taskId, "approval.rejected", {
-        approvalId: approval.id,
-        toolName: name,
-      });
       if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
         await taskStore.transition(ctx.taskId, "cancelled");
         emit(ctx.taskId, "task.cancelled", { reason: "approval rejected" });
@@ -337,4 +334,142 @@ export async function createAndRunTask({
     task: (await taskStore.get(task.id)) as AgentTask,
     events: await taskStore.getEvents(task.id),
   };
+}
+
+// ===========================================================================
+// Approval 决策 + 真正的 Task Resume（Phase 10.3）
+// ===========================================================================
+
+export interface ApprovalDecisionResult {
+  ok: boolean;
+  status?: string;
+  reason?: string;
+}
+
+/**
+ * 统一的审批决策入口（API / 脚本都走这里）：
+ * 原子持久化 pending→approved/rejected → 发布事件 → 同进程唤醒 waiter；
+ * 若无 waiter（进程已重启）→ 走持久化 resume / cancel。幂等、不重复副作用。
+ */
+export async function applyApprovalDecision(
+  taskId: string,
+  approvalId: string,
+  action: "approve" | "reject",
+): Promise<ApprovalDecisionResult> {
+  const approvalStore = getApprovalStore();
+  const existing = await approvalStore.get(approvalId);
+  if (!existing || existing.taskId !== taskId) {
+    return { ok: false, reason: "not_found" };
+  }
+  if (existing.status !== "pending") {
+    return { ok: true, status: existing.status }; // 幂等：已解析，不重复执行
+  }
+
+  const resolved = await resolveApprovalState(approvalId, action);
+  if (!resolved) {
+    const latest = await approvalStore.get(approvalId);
+    return { ok: true, status: latest?.status };
+  }
+
+  const { approval, hadWaiter } = resolved;
+  emit(
+    taskId,
+    action === "approve" ? "approval.approved" : "approval.rejected",
+    { approvalId: approval.id, toolName: approval.toolName },
+  );
+
+  if (!hadWaiter) {
+    if (action === "approve") {
+      await resumeApprovedTool(taskId, approval);
+    } else {
+      await cancelWaitingTask(taskId);
+    }
+  }
+  return { ok: true, status: approval.status };
+}
+
+async function cancelWaitingTask(taskId: string): Promise<void> {
+  if ((await taskStore.get(taskId))?.status === "waiting") {
+    await taskStore.transition(taskId, "cancelled");
+    emit(taskId, "task.cancelled", { reason: "approval rejected" });
+  }
+}
+
+/**
+ * 进程重启后恢复：原进程的 LLM / Promise 已消失，这里不重跑已完成步骤、不重调 LLM，
+ * 只把「被批准的那一个工具」安全地执行恰好一次（Resume 仍重新校验 guard，不绕过安全），
+ * 然后收尾任务。Agent 的后续 LLM 对话无法跨进程续跑（未持久化会话，见技术债务）。
+ */
+async function resumeApprovedTool(
+  taskId: string,
+  approval: AgentApproval,
+): Promise<void> {
+  const task = await taskStore.get(taskId);
+  if (!task || task.status !== "waiting") {
+    return;
+  }
+
+  const guard = await preApprovalGuard(
+    approval.toolName,
+    approval.input,
+    WORKSPACE_ROOT,
+  );
+  if (!guard.ok) {
+    await taskStore.update(taskId, {
+      error: { code: "RESUME_DENIED", message: guard.error ?? "denied" },
+    });
+    await taskStore.transition(taskId, "failed");
+    emit(taskId, "task.failed", { code: "RESUME_DENIED", message: guard.error });
+    return;
+  }
+
+  const tools = await resolveTools();
+  const tool = tools[approval.toolName];
+  // Workflow 审批节点等「非本地工具」的 approval 无法跨进程 resume（会话/执行态未持久化，
+  // 见技术债务）。在产生任何副作用或状态流转前先失败收尾，不发 tool.started、不重复执行。
+  if (!tool || typeof tool.execute !== "function") {
+    const message = `resume unsupported: tool not found "${approval.toolName}"`;
+    await taskStore.update(taskId, {
+      error: { code: "RESUME_UNSUPPORTED", message },
+    });
+    await taskStore.transition(taskId, "failed");
+    emit(taskId, "task.failed", { code: "RESUME_UNSUPPORTED", message });
+    return;
+  }
+
+  await taskStore.transition(taskId, "running");
+
+  const step = (task.currentStep ?? 0) + 1;
+  emit(taskId, "tool.started", {
+    step,
+    tool: approval.toolName,
+    input: sanitizeToolInput(approval.toolName, approval.input),
+  });
+
+  try {
+    const execute = tool.execute as (i: unknown, o: unknown) => Promise<unknown>;
+    const output = await execute(approval.input, {
+      toolCallId: `resume-${approval.id}`,
+      messages: [],
+    });
+    emit(taskId, "tool.completed", {
+      step,
+      tool: approval.toolName,
+      success: (output as { success?: boolean })?.success !== false,
+      result: sanitizeToolOutput(approval.toolName, output),
+    });
+    await taskStore.update(taskId, {
+      answer: `[resumed] ${approval.toolName} executed once after restart`,
+      currentStep: step,
+    });
+    await taskStore.transition(taskId, "completed");
+    emit(taskId, "task.completed", { resumed: true });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "resume tool failed";
+    await taskStore.update(taskId, {
+      error: { code: "RESUME_TOOL_ERROR", message },
+    });
+    await taskStore.transition(taskId, "failed");
+    emit(taskId, "task.failed", { code: "RESUME_TOOL_ERROR", message });
+  }
 }

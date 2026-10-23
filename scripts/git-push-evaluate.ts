@@ -7,7 +7,7 @@ import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
 import { getExecution } from "@/lib/agent/workflow/execution-store";
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { resolveApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import { getTraceByTask } from "@/lib/agent/trace/store";
 import type { WorkflowDefinition } from "@/lib/agent/workflow/types";
 
@@ -39,7 +39,7 @@ function drive(taskId: string, mode: "approve" | "reject", sink?: { tools: strin
       if (e.type === "tool.started" && sink) sink.tools.push((e.data as { tool: string }).tool);
       if (e.type === "approval.required") {
         if (sink) sink.approvals.push((e.data as { toolName: string }).toolName);
-        resolveApproval((e.data as { approvalId: string }).approvalId, mode);
+        void applyApprovalDecision(taskId, (e.data as { approvalId: string }).approvalId, mode);
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();

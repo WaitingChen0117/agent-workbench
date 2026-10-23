@@ -133,8 +133,8 @@ async function runCase(kind: string): Promise<Check[]> {
       await recoverTasks(freshStore());
       const got = await freshStore().get(t.id);
       const evs = await freshStore().getEvents(t.id);
-      add(got?.status === "failed", "waiting task safely ended → failed (no auto-approve)");
-      add(!!got?.error?.message?.includes("Approval state lost"), "reason: Approval state lost after process restart");
+      add(got?.status === "failed", "waiting task w/o pending approval safely ended → failed (no auto-approve)");
+      add(!!got?.error?.message?.includes("no pending approval"), "reason: waiting task has no pending approval");
       add(!evs.some((e) => e.type === "tool.started"), "no approval_required tool executed during recovery");
       break;
     }

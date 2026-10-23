@@ -8,7 +8,7 @@ import { createAndStartTask } from "@/lib/agent/task/runtime";
 import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
 import { getExecution } from "@/lib/agent/workflow/execution-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
-import { resolveApproval } from "@/lib/agent/approvals";
+import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import type { WorkflowDefinition } from "@/lib/agent/workflow/types";
 
@@ -33,7 +33,7 @@ function driveTask(taskId: string, mode: "approve" | "reject"): Promise<void> {
   return new Promise((resolve) => {
     const unsub = eventBus.subscribe(taskId, (e) => {
       if (e.type === "approval.required") {
-        resolveApproval((e.data as { approvalId: string }).approvalId, mode);
+        void applyApprovalDecision(taskId, (e.data as { approvalId: string }).approvalId, mode);
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();

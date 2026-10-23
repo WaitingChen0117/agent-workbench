@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.8.0] - 2026-10-23 — Persistent Approval + Task Resume
+
+### Added
+
+- `ApprovalStore` abstraction (`src/lib/agent/approval/approval-store.ts`): persist Approval **state** (`pending`/`approved`/`rejected`) separately from the non-persistable in-process waiting Promise.
+- `SQLiteApprovalStore` (`node:sqlite`, reuses the same DB file as tasks): table `agent_approvals` + `idx_approvals_task`; `resolve()` is atomic (`BEGIN IMMEDIATE`) so a given approval can only be resolved once (execute-once guarantee).
+- `MemoryApprovalStore` + `getApprovalStore()` factory selecting the backend via `AGENT_APPROVAL_STORE` (+ `AGENT_TASK_DB_PATH`).
+- `ApprovalWaiter` registry (`src/lib/agent/approval/waiter.ts`): in-process `register/has/resolveWaiter` for same-process approval wake-up.
+- Real cross-process **Task Resume**: `applyApprovalDecision()` + `resumeApprovedTool()` in Runtime — after a restart (no waiter), approving a `waiting` task re-runs the pre-approval Guard and executes the single approved tool exactly once, then completes the task; rejecting cancels it.
+- Approval persistence evaluation (`data/approval-persistence-evaluation.json`, `scripts/approval-persistence-evaluate.ts`, `scripts/approval-child.ts`) with 12 cases incl. real cross-process verification, plus the `approval:persistence:evaluate` CLI.
+
+### Changed
+
+- `src/lib/agent/approvals.ts` is now a thin facade over `ApprovalStore` + `ApprovalWaiter`: `createApproval`/`getApproval`/`listApprovals` are **async**; the atomic `resolveApprovalState` replaces the old sync `resolveApproval`.
+- Approval API routes and all evaluation scripts migrated to `await getApproval`/`listApprovals` and the unified `applyApprovalDecision(taskId, approvalId, action)` entry point.
+- `approval.approved`/`approval.rejected` events are now emitted solely by `applyApprovalDecision` (removed from the Permission Gate) to avoid double emission.
+- Recovery semantics: `waiting` + pending approval → **kept waiting** (truly resumable, emits `task.recovered` with reason `approval_waiting`); `waiting` without a pending approval → safely `failed`. `RecoveryResult` gains a `keptWaiting` counter.
+
+### Security
+
+- Permission Approval is still not a security bypass: resume re-runs `preApprovalGuard` before executing the approved tool; a denied guard ends the task as `failed` (`RESUME_DENIED`).
+- Execute-once is enforced at the store layer (atomic `resolve`), so duplicate/concurrent approvals never produce duplicate side effects.
+- Non-resumable approvals (e.g. Workflow in-memory executions) fail cleanly as `RESUME_UNSUPPORTED` **before** any state transition or `tool.started`, so no partial side effect is attempted.
+- Approval `input` persisted to SQLite is the Guard-validated tool input; sanitize rules are unchanged for API responses.
+
 ## [1.7.0] - 2026-10-23 — SQLite Task Persistence + Crash Recovery
 
 ### Added
