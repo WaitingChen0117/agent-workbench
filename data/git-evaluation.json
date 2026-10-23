@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "git-status",
+      "tool": "gitStatus",
+      "input": {},
+      "successCriteria": [{ "type": "field", "path": "branch" }]
+    },
+    {
+      "id": "git-diff",
+      "tool": "gitDiff",
+      "input": {},
+      "successCriteria": [{ "type": "field", "path": "truncated" }]
+    },
+    {
+      "id": "git-log",
+      "tool": "gitLog",
+      "input": { "limit": 5 },
+      "successCriteria": [{ "type": "arrayNonEmpty" }]
+    },
+    {
+      "id": "git-branch",
+      "tool": "gitBranch",
+      "input": {},
+      "successCriteria": [{ "type": "field", "path": "current" }]
+    },
+    {
+      "id": "git-show",
+      "tool": "gitShow",
+      "input": { "ref": "HEAD" },
+      "successCriteria": [{ "type": "field", "path": "hash" }]
+    }
+  ]
+}

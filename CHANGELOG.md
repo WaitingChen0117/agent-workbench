@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.2.0] - 2026-10-23 — Git Read-only MCP
+
+### Added
+
+- Git MCP Server (`git-mcp`, stdio).
+- `gitStatus`, `gitDiff`, `gitLog`, `gitBranch`, `gitShow` (all read-only).
+- Git MCP tool integration (multi-server MCP client).
+- Git Evaluation (`data/git-evaluation.json`) and the `git:evaluate` CLI.
+
+### Changed
+
+- Tool Resolver now merges Local + Filesystem MCP + Git MCP tools.
+- Coding Agent can inspect repository state through Git MCP (no approval needed).
+
+### Security
+
+- Git operations restricted to the workspace (repository must live inside it).
+- Read-only Git tool allowlist; no generic runGitCommand.
+- No arbitrary git command execution (add/commit/push/reset/checkout/... not exposed).
+- No shell execution (execFile with shell:false, structured args).
+- Diff/log/show output size limits (maxBytes / maxLines / file counts).
+- Git ref validation blocks option injection; sensitive keys sanitized in traces.
+
 ## [1.1.0] - 2026-10-23 — Agent Workflow / DAG Runtime
 
 ### Added

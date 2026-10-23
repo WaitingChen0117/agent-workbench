@@ -17,9 +17,17 @@ const TOOL_POLICY: Record<string, ToolPermission> = {
   searchKnowledge: "allow",
   getCurrentTime: "allow",
 
+  // Git 只读工具 → 允许（无需审批）
+  gitStatus: "allow",
+  gitDiff: "allow",
+  gitLog: "allow",
+  gitBranch: "allow",
+  gitShow: "allow",
+
   // 有副作用 → 需要人工审批
   writeFile: "approval_required",
   runCommand: "approval_required",
+  // 为未来预留（本阶段未实现）：gitAdd / gitCommit / gitPush 将是 approval_required
 };
 
 export function getToolPermission(toolName: string): ToolPermission {
