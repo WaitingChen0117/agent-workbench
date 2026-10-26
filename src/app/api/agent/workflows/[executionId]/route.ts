@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 
-import { getExecution } from "@/lib/agent/workflow/execution-store";
+import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 
 export const runtime = "nodejs";
 
-// GET /api/agent/workflows/:executionId —— 查询 Workflow 执行状态
+// GET /api/agent/workflows/:executionId —— 查询 Workflow 执行状态（从持久化 Store 读取）
 export async function GET(
   _req: Request,
   { params }: { params: Promise<{ executionId: string }> },
 ) {
   const { executionId } = await params;
 
-  const execution = getExecution(executionId);
+  const execution = await getWorkflowExecutionStore().get(executionId);
 
   if (!execution) {
     return NextResponse.json(

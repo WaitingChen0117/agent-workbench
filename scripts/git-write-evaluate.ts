@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { preApprovalGuard } from "@/lib/agent/guard";
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
-import { getExecution } from "@/lib/agent/workflow/execution-store";
+import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import { getTaskStore } from "@/lib/agent/task/task-store";
@@ -48,7 +48,7 @@ async function runWorkflow(def: WorkflowDefinition, mode: "approve" | "reject"):
   await driveTask(ex.taskId, mode);
   // 让引擎 catch/收尾完成后再读 execution 状态，避免与 task.cancelled 事件竞争
   await new Promise((r) => setTimeout(r, 30));
-  return getExecution(ex.executionId)?.status;
+  return (await getWorkflowExecutionStore().get(ex.executionId))?.status;
 }
 
 // PLACEHOLDER_GWE

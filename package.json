@@ -1,6 +1,6 @@
 {
   "name": "agent-workbench",
-  "version": "1.9.0",
+  "version": "1.10.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18,7 +18,8 @@
     "task:persistence:evaluate": "tsx --env-file=.env.local scripts/task-persistence-evaluate.ts",
     "task:sqlite:evaluate": "tsx --env-file=.env.local scripts/task-sqlite-evaluate.ts",
     "approval:persistence:evaluate": "tsx --env-file=.env.local scripts/approval-persistence-evaluate.ts",
-    "session:persistence:evaluate": "tsx --env-file=.env.local scripts/session-persistence-evaluate.ts"
+    "session:persistence:evaluate": "tsx --env-file=.env.local scripts/session-persistence-evaluate.ts",
+    "workflow:persistence:evaluate": "tsx --env-file=.env.local scripts/workflow-persistence-evaluate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.92",

@@ -27,6 +27,18 @@ export interface WorkflowExecutors {
   emitWorkflow(
     type: "workflow.started" | "workflow.completed" | "workflow.failed",
   ): void;
+  // Phase 10.5：节点/执行态持久化钩子（Memory 实现为 no-op 亦可）
+  persistNodeRunning(node: WorkflowNode): Promise<void>;
+  persistNodeCompleted(
+    node: WorkflowNode,
+    result: unknown,
+    branch?: "true" | "false",
+  ): Promise<void>;
+  persistNodeFailed(
+    node: WorkflowNode,
+    error: { code: string; message: string },
+  ): Promise<void>;
+  persistExecution(): Promise<void>;
 }
 
 const MAX_CONTEXT_STRING = 4000;
@@ -76,7 +88,7 @@ function writeContext(
   }
 }
 
-function resolveNext(
+export function resolveNext(
   def: WorkflowDefinition,
   nodeId: string,
   isCondition: boolean,
@@ -100,10 +112,16 @@ function resolveNext(
   return (unconditional ?? outgoing[0]).target;
 }
 
+export interface RunWorkflowOptions {
+  // Phase 10.5：从指定节点恢复执行（context 已预加载，前序已完成节点不再重跑）。
+  resumeFromNodeId?: string;
+}
+
 export async function runWorkflow(
   def: WorkflowDefinition,
   execution: WorkflowExecution,
   executors: WorkflowExecutors,
+  options: RunWorkflowOptions = {},
 ): Promise<void> {
   const validation = validateWorkflow(def);
   if (!validation.valid || !validation.startNodeId) {
@@ -113,19 +131,25 @@ export async function runWorkflow(
       message: validation.errors.join("; "),
     };
     execution.endedAt = nowIso();
+    await executors.persistExecution();
     executors.emitWorkflow("workflow.failed");
     return;
   }
 
-  executors.emitWorkflow("workflow.started");
+  const resuming = !!options.resumeFromNodeId;
+  if (!resuming) {
+    executors.emitWorkflow("workflow.started");
+  }
 
   const nodeMap = new Map(def.nodes.map((n) => [n.id, n]));
   const maxSteps = def.maxSteps ?? 100;
-  let currentId: string | undefined = validation.startNodeId;
-  let steps = 0;
+  let currentId: string | undefined =
+    options.resumeFromNodeId ?? validation.startNodeId;
+  let steps = execution.stepCount ?? 0;
 
   while (currentId) {
     steps += 1;
+    execution.stepCount = steps;
     if (steps > maxSteps) {
       execution.status = "failed";
       execution.error = {
@@ -133,12 +157,15 @@ export async function runWorkflow(
         message: `exceeded maxSteps (${maxSteps})`,
       };
       execution.endedAt = nowIso();
+      await executors.persistExecution();
       executors.emitWorkflow("workflow.failed");
       return;
     }
 
     const node = nodeMap.get(currentId) as WorkflowNode;
     execution.currentNodeId = currentId;
+    await executors.persistNodeRunning(node);
+    await executors.persistExecution();
     executors.emitNode("workflow.node.started", node);
 
     let branch: "true" | "false" | undefined;
@@ -152,6 +179,7 @@ export async function runWorkflow(
             (node.config?.output as string) ?? "agentResult",
             result,
           );
+          await executors.persistNodeCompleted(node, result);
           break;
         }
         case "tool": {
@@ -160,6 +188,7 @@ export async function runWorkflow(
             (node.config?.output as string) ??
             `${String(node.config?.tool ?? "tool")}Result`;
           writeContext(execution, key, result);
+          await executors.persistNodeCompleted(node, result);
           break;
         }
         case "approval": {
@@ -168,40 +197,50 @@ export async function runWorkflow(
             execution.context,
           );
           if (decision === "rejected") {
+            await executors.persistNodeCompleted(node, { decision });
             executors.emitNode("workflow.node.completed", node);
             execution.status = "cancelled";
             execution.endedAt = nowIso();
+            await executors.persistExecution();
             executors.emitWorkflow("workflow.failed");
             return;
           }
+          await executors.persistNodeCompleted(node, { decision });
           break;
         }
         case "condition": {
           branch = evalCondition(node, execution.context) ? "true" : "false";
           writeContext(execution, `${node.id}.branch`, branch);
+          await executors.persistNodeCompleted(node, { branch }, branch);
           break;
         }
         case "end": {
+          await executors.persistNodeCompleted(node, undefined);
           executors.emitNode("workflow.node.completed", node);
           execution.status = "completed";
           execution.endedAt = nowIso();
+          await executors.persistExecution();
           executors.emitWorkflow("workflow.completed");
           return;
         }
       }
 
+      await executors.persistExecution();
       executors.emitNode("workflow.node.completed", node);
     } catch (error) {
+      const err = {
+        code: "NODE_FAILED",
+        message: error instanceof Error ? error.message : "node failed",
+      };
+      await executors.persistNodeFailed(node, err);
       executors.emitNode("workflow.node.failed", node);
       // 若节点执行中已被取消（如工具审批被拒），保持 cancelled，不覆盖为 failed
       if (execution.status !== "cancelled") {
         execution.status = "failed";
-        execution.error = {
-          code: "NODE_FAILED",
-          message: error instanceof Error ? error.message : "node failed",
-        };
+        execution.error = err;
       }
       execution.endedAt = nowIso();
+      await executors.persistExecution();
       executors.emitWorkflow("workflow.failed");
       return;
     }
@@ -210,6 +249,7 @@ export async function runWorkflow(
     if (!next) {
       execution.status = "completed";
       execution.endedAt = nowIso();
+      await executors.persistExecution();
       executors.emitWorkflow("workflow.completed");
       return;
     }

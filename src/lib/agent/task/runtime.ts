@@ -22,6 +22,7 @@ import {
   type AgentApproval,
 } from "@/lib/agent/approval/approval-store";
 import { getSessionStore } from "@/lib/agent/session/session-store";
+import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import {
   sanitizeMessageContent,
   sanitizePendingInput,
@@ -517,7 +518,18 @@ export async function applyApprovalDecision(
   );
 
   if (!hadWaiter) {
-    if (action === "approve") {
+    // Workflow 任务走 Workflow Resume；普通 Agent 任务走 Agent Session Resume。
+    const wfExec = await getWorkflowExecutionStore().getByTaskId(taskId);
+    if (wfExec) {
+      const { resumeWorkflowExecution, rejectWorkflowExecution } = await import(
+        "@/lib/agent/workflow/run"
+      );
+      if (action === "approve") {
+        await resumeWorkflowExecution(wfExec.executionId);
+      } else {
+        await rejectWorkflowExecution(wfExec.executionId);
+      }
+    } else if (action === "approve") {
       await resumeAgentSession(taskId, approval);
     } else {
       await cancelWaitingTask(taskId, approval.id);

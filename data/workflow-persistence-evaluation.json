@@ -1,0 +1,18 @@
+{
+  "cases": [
+    { "id": "workflow-create", "kind": "workflow-create" },
+    { "id": "workflow-persist", "kind": "workflow-persist" },
+    { "id": "workflow-node-persist", "kind": "workflow-node-persist" },
+    { "id": "workflow-context-persist", "kind": "workflow-context-persist" },
+    { "id": "workflow-node-order", "kind": "workflow-node-order" },
+    { "id": "workflow-restart-persistence", "kind": "workflow-restart-persistence" },
+    { "id": "recovery-running", "kind": "recovery-running" },
+    { "id": "recovery-waiting-approval", "kind": "recovery-waiting-approval" },
+    { "id": "recovery-missing-approval", "kind": "recovery-missing-approval" },
+    { "id": "resume-writeFile", "kind": "resume-writeFile" },
+    { "id": "resume-gitAdd", "kind": "resume-gitAdd" },
+    { "id": "resume-gitPush-mock", "kind": "resume-gitPush-mock" },
+    { "id": "condition-resume", "kind": "condition-resume" },
+    { "id": "full-workflow-resume", "kind": "full-workflow-resume" }
+  ]
+}

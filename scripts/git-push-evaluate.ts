@@ -4,7 +4,7 @@ import path from "node:path";
 import { preApprovalGuard } from "@/lib/agent/guard";
 import { validatePushInput } from "@/lib/mcp/git/core";
 import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
-import { getExecution } from "@/lib/agent/workflow/execution-store";
+import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import { createAndStartTask } from "@/lib/agent/task/runtime";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { applyApprovalDecision } from "@/lib/agent/task/runtime";
@@ -53,7 +53,7 @@ async function runWf(def: WorkflowDefinition, mode: "approve" | "reject"): Promi
   const ex = await createAndStartWorkflowTask({ definition: def, input: {} });
   await drive(ex.taskId, mode);
   await new Promise((r) => setTimeout(r, 30));
-  return { status: getExecution(ex.executionId)?.status, taskId: ex.taskId };
+  return { status: (await getWorkflowExecutionStore().get(ex.executionId))?.status, taskId: ex.taskId };
 }
 
 async function runCase(c: PushCase): Promise<{ ok: boolean; note: string }> {

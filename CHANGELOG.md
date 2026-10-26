@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.10.0] - 2026-10-26 — Workflow Execution Persistence + Full Workflow Resume
+
+### Added
+
+- `WorkflowExecutionStore` abstraction + `MemoryWorkflowExecutionStore` + `getWorkflowExecutionStore()` (backend via `AGENT_WORKFLOW_EXECUTION_STORE`, default `memory`; independent of `AGENT_TASK_STORE`).
+- `SQLiteWorkflowExecutionStore` reusing the Task DB (`AGENT_TASK_DB_PATH`): tables `agent_workflow_executions` (+ task_id/workflow_id/status indexes) and `agent_workflow_node_executions` (PRIMARY KEY(execution_id, node_id)); JSON fields (error/context/result/definition) stored as TEXT. WAL mode.
+- Per-node execution persistence (`WorkflowNodeExecution`: pending/running/waiting/completed/failed, result, approvalId link, condition branch, attempt) and Workflow context persisted after every node.
+- `resumeWorkflowExecution(executionId)` + `rejectWorkflowExecution(executionId)`: cross-process Full Workflow Resume — re-run Guard, execute the approved tool exactly once, restore context, continue the DAG from the next node; completed nodes and already-computed conditions are never re-run.
+- Engine resume support (`runWorkflow(..., { resumeFromNodeId })`) and persistence hooks (`persistNodeRunning/Completed/Failed`, `persistExecution`).
+- `GET /api/agent/workflows/:executionId/nodes` (per-node execution state). Workflow evaluation: `data/workflow-persistence-evaluation.json`, `scripts/workflow-persistence-evaluate.ts`, `scripts/workflow-child.ts`, and `workflow:persistence:evaluate` (14 cases, real cross-process).
+
+### Changed
+
+- Workflow Engine now persists execution/node/context through `WorkflowExecutionStore` as it runs; same-process blocking-approval behavior is unchanged.
+- `GET /api/agent/workflows/:executionId` and the workflow eval scripts read from the persistent store (async) instead of the in-memory map.
+- `applyApprovalDecision` routes workflow tasks to `resumeWorkflowExecution`/`rejectWorkflowExecution`; non-workflow tasks still use Agent Session resume.
+- Crash recovery (`recovery.ts`) also scans workflow executions: running → failed (`workflow_running_recovery`); waiting + pending approval → kept waiting (`workflow_approval_waiting`); waiting + no approval → failed (`workflow_missing_approval`); idempotent. Workflow tasks are handled by the workflow pass (not double-processed by the task pass).
+
+### Security
+
+- Persistence is a sensitive boundary: node results and context pass through `sanitizeToolOutput`; approval input is read from the ApprovalStore (not re-stored in the workflow); no token/secret/authorization persisted.
+- Resume never bypasses the permission system: it re-runs `preApprovalGuard` and `resolveTools`, and only executes an already-atomically-approved tool once (execute-once preserved; Guard-denied → `RESUME_GUARD_DENIED`, no execution).
+- Workflow recovery never auto-reruns a `running` execution (unknown side-effect state). Agent nodes inside a workflow are not cross-process resumable and fail cleanly as `RESUME_UNSUPPORTED` (no `tool.started`, no side effect).
+- No new infrastructure: Node built-in `node:sqlite` + existing Event Bus only.
+
 ## [1.9.0] - 2026-10-23 — Agent Session Persistence + Full Resume
 
 ### Added

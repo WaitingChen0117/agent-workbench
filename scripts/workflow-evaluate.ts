@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { validateWorkflow } from "@/lib/agent/workflow/validator";
 import { createAndStartWorkflowTask } from "@/lib/agent/workflow/run";
-import { getExecution } from "@/lib/agent/workflow/execution-store";
+import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { applyApprovalDecision } from "@/lib/agent/task/runtime";
 import type { WorkflowDefinition } from "@/lib/agent/workflow/types";
@@ -35,8 +35,11 @@ async function runWorkflowCase(c: WfCase): Promise<{ status: string | undefined;
       }
       if (e.type === "task.completed" || e.type === "task.failed" || e.type === "task.cancelled") {
         unsub();
-        const ex = getExecution(execution.executionId);
-        resolve({ status: ex?.status, context: ex?.context ?? {}, errorCode: ex?.error?.code });
+        void getWorkflowExecutionStore()
+          .get(execution.executionId)
+          .then((ex) =>
+            resolve({ status: ex?.status, context: ex?.context ?? {}, errorCode: ex?.error?.code }),
+          );
       }
     });
   });

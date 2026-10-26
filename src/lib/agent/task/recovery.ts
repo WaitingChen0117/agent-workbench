@@ -7,6 +7,10 @@ import {
   type ApprovalStore,
 } from "@/lib/agent/approval/approval-store";
 import { getSessionStore } from "@/lib/agent/session/session-store";
+import {
+  getWorkflowExecutionStore,
+  type WorkflowExecutionStore,
+} from "@/lib/agent/workflow/execution-store";
 import type { SessionStatus } from "@/lib/agent/session/types";
 import type { AgentTaskEvent } from "@/lib/agent/task/types";
 
@@ -63,10 +67,20 @@ async function syncSessionOnRecovery(
 export async function recoverTasks(
   store: TaskStore = getTaskStore(),
   approvalStore: ApprovalStore = getApprovalStore(),
+  execStore: WorkflowExecutionStore = getWorkflowExecutionStore(),
 ): Promise<RecoveryResult> {
   const all = await store.list();
-  const running = all.filter((t) => t.status === "running");
-  const waiting = all.filter((t) => t.status === "waiting");
+
+  // 先处理 Workflow executions；对应的 Task 交给 Workflow pass，避免普通 Task pass 重复处理。
+  const workflowExecutions = await execStore.list();
+  const workflowTaskIds = new Set(workflowExecutions.map((e) => e.taskId));
+
+  const running = all.filter(
+    (t) => t.status === "running" && !workflowTaskIds.has(t.id),
+  );
+  const waiting = all.filter(
+    (t) => t.status === "waiting" && !workflowTaskIds.has(t.id),
+  );
 
   let recovered = 0;
   let keptWaiting = 0;
@@ -117,6 +131,80 @@ export async function recoverTasks(
         previousStatus: "waiting",
         status: "failed",
         reason: "missing_approval",
+      });
+      recovered += 1;
+    }
+  }
+
+  // Workflow executions 恢复（Phase 10.5）
+  for (const execution of workflowExecutions) {
+    const taskId = execution.taskId;
+    if (
+      execution.status === "completed" ||
+      execution.status === "failed" ||
+      execution.status === "cancelled"
+    ) {
+      continue; // 终态跳过
+    }
+
+    if (execution.status === "running") {
+      const reason = "Workflow interrupted by process restart";
+      await execStore.update(execution.executionId, {
+        status: "failed",
+        error: { code: "RECOVERED", message: reason },
+        endedAt: nowIso(),
+      });
+      await store.update(taskId, { error: { code: "RECOVERED", message: reason } });
+      if ((await store.get(taskId))?.status === "running") {
+        await store.transition(taskId, "failed");
+      }
+      await recordRecovery(store, taskId, {
+        taskId,
+        executionId: execution.executionId,
+        previousStatus: "running",
+        status: "failed",
+        reason: "workflow_running_recovery",
+      });
+      recovered += 1;
+      continue;
+    }
+
+    // waiting：区分有/无 pending approval
+    const pending = (await approvalStore.getByTaskId(taskId)).filter(
+      (a) => a.status === "pending",
+    );
+    if (pending.length > 0) {
+      const events = await store.getEvents(taskId);
+      const already = events.some((e) => e.type === "task.recovered");
+      if (!already) {
+        await recordRecovery(store, taskId, {
+          taskId,
+          executionId: execution.executionId,
+          nodeId: execution.currentNodeId,
+          previousStatus: "waiting",
+          status: "waiting",
+          reason: "workflow_approval_waiting",
+          approvalId: pending[0].id,
+        });
+      }
+      keptWaiting += 1;
+    } else {
+      const reason = "Workflow waiting state has no pending approval";
+      await execStore.update(execution.executionId, {
+        status: "failed",
+        error: { code: "RECOVERED", message: reason },
+        endedAt: nowIso(),
+      });
+      await store.update(taskId, { error: { code: "RECOVERED", message: reason } });
+      if ((await store.get(taskId))?.status === "waiting") {
+        await store.transition(taskId, "failed");
+      }
+      await recordRecovery(store, taskId, {
+        taskId,
+        executionId: execution.executionId,
+        previousStatus: "waiting",
+        status: "failed",
+        reason: "workflow_missing_approval",
       });
       recovered += 1;
     }

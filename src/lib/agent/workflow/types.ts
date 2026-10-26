@@ -54,6 +54,36 @@ export interface WorkflowExecution {
   endedAt?: string;
   error?: { code: string; message: string };
   context: Record<string, unknown>;
+  // Phase 10.5：持久化附加字段
+  stepCount?: number;
+  updatedAt?: string;
+  // 持久化 WorkflowDefinition 以支持跨进程 resume（API 响应不返回此字段）
+  definition?: WorkflowDefinition;
+}
+
+// --- Phase 10.5：Node 执行态持久化 ---
+
+export type NodeExecutionStatus =
+  | "pending"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed";
+
+export interface WorkflowNodeExecution {
+  executionId: string;
+  nodeId: string;
+  nodeType: WorkflowNodeType;
+  status: NodeExecutionStatus;
+  startedAt?: string;
+  endedAt?: string;
+  result?: unknown;
+  error?: { code: string; message: string };
+  // 审批类节点/工具节点等待时关联的 approvalId，供跨进程 resume 定位
+  approvalId?: string;
+  // condition 节点已计算的分支结果（持久化后 resume 不重算）
+  branch?: "true" | "false";
+  attempt: number;
 }
 
 // --- 各节点 config 形状（读取时做窄化，不强依赖） ---
