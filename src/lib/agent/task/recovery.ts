@@ -6,6 +6,8 @@ import {
   getApprovalStore,
   type ApprovalStore,
 } from "@/lib/agent/approval/approval-store";
+import { getSessionStore } from "@/lib/agent/session/session-store";
+import type { SessionStatus } from "@/lib/agent/session/types";
 import type { AgentTaskEvent } from "@/lib/agent/task/types";
 
 /**
@@ -46,6 +48,18 @@ async function recordRecovery(
   eventBus.publish(event);
 }
 
+// Session 状态随 Task 一起恢复（Phase 10.4）；Session 不存在则 no-op。
+async function syncSessionOnRecovery(
+  taskId: string,
+  status: SessionStatus,
+): Promise<void> {
+  const sessionStore = getSessionStore();
+  const session = await sessionStore.getByTaskId(taskId);
+  if (session && session.status !== status) {
+    await sessionStore.update(session.sessionId, { status });
+  }
+}
+
 export async function recoverTasks(
   store: TaskStore = getTaskStore(),
   approvalStore: ApprovalStore = getApprovalStore(),
@@ -62,6 +76,7 @@ export async function recoverTasks(
     const reason = "Task interrupted by process restart";
     await store.update(task.id, { error: { code: "RECOVERED", message: reason } });
     await store.transition(task.id, "failed");
+    await syncSessionOnRecovery(task.id, "failed");
     await recordRecovery(store, task.id, {
       taskId: task.id,
       previousStatus: "running",
@@ -79,6 +94,7 @@ export async function recoverTasks(
 
     if (pending.length > 0) {
       // 幂等：已经 recover 过就不重复发事件，保持 waiting、不注册 waiter、不执行任何工具
+      await syncSessionOnRecovery(task.id, "waiting");
       const events = await store.getEvents(task.id);
       const already = events.some((e) => e.type === "task.recovered");
       if (!already) {
@@ -95,6 +111,7 @@ export async function recoverTasks(
       const reason = "Waiting task has no pending approval";
       await store.update(task.id, { error: { code: "RECOVERED", message: reason } });
       await store.transition(task.id, "failed");
+      await syncSessionOnRecovery(task.id, "failed");
       await recordRecovery(store, task.id, {
         taskId: task.id,
         previousStatus: "waiting",

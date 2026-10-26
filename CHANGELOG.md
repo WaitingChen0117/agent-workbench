@@ -15,6 +15,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.9.0] - 2026-10-23 — Agent Session Persistence + Full Resume
+
+### Added
+
+- `AgentSession` data model (`src/lib/agent/session/types.ts`): reuses `AgentMessage`; adds `AgentSessionMessage` and `AgentSessionPendingAction` (the tool call awaiting approval), plus `sanitizePendingInput` / `sanitizeMessageContent`.
+- `SessionStore` abstraction + `MemorySessionStore` + `getSessionStore()` (backend chosen only here via `AGENT_SESSION_STORE`, same style as Task/Approval stores).
+- `SQLiteSessionStore`: reuses the Task DB (`AGENT_TASK_DB_PATH`); tables `agent_sessions` (task_id UNIQUE → 1:1), `agent_session_messages` (PRIMARY KEY(session_id, sequence), sequence taken in a transaction), `agent_session_pending_actions` (approval_id UNIQUE → one pending action per approval).
+- Injectable Agent Loop runner seam (`setAgentLoopRunner` / `getAgentLoopRunner`); production default stays `streamAgent` (real LLM). First run and resume share the same runner — no second Agent Loop.
+- Full cross-process resume (`resumeAgentSession` + `reenterAgentLoop`): approve → execute the approved tool once → append the tool result to the Session → **re-enter the same Agent Loop** (LLM re-inference, may request further tools → new approval → waiting again) until a final answer.
+- Session API: `GET /api/agent/tasks/:taskId/session` (sanitized full history) and `/session/summary` (counts + pendingTool/pendingApprovalId).
+- Session evaluation: `data/session-persistence-evaluation.json`, `scripts/session-persistence-evaluate.ts`, `scripts/session-child.ts` (deterministic injectable stub runner, real cross-process). New `session:persistence:evaluate` CLI (14 cases).
+
+### Changed
+
+- Task creation now creates a 1:1 Session and persists the initial user message(s). The Permission Gate persists a sanitized pending action and syncs the Session to `waiting`; approve/reject/complete/fail/cancel all sync Session status.
+- Approval resume now re-enters the Agent Loop instead of only executing one tool and finishing (Phase 10.3 → 10.4). `applyApprovalDecision` approve path calls `resumeAgentSession`; `resumeApprovedTool` was replaced.
+- Crash recovery (`recovery.ts`) syncs Session status alongside Task status; `waiting` + pending approval stays resumable, idempotent `task.recovered` unchanged.
+- Resume guard-denied code renamed to `RESUME_GUARD_DENIED` (was `RESUME_DENIED`).
+
+### Security
+
+- Session is treated as a sensitive boundary: messages are sanitized before persistence (`sanitizeMessageContent`); pending-action input is sanitized (`sanitizePendingInput`) — **writeFile content is never stored in the Session** (resume reads the real input from the already-persisted ApprovalStore record).
+- Resume always re-runs `preApprovalGuard` and `resolveTools`; a denied guard ends the task as `failed` (`RESUME_GUARD_DENIED`), never executing the tool.
+- Execute-once preserved: the atomic `ApprovalStore.resolve` guarantees a tool runs at most once across duplicate/concurrent approvals (no duplicate file write / git add / push).
+- Non-resumable approvals (e.g. Workflow in-memory executions) fail cleanly as `RESUME_UNSUPPORTED` before any transition or `tool.started`.
+- No new infrastructure: SQLite + existing Event Bus only.
+
 ## [1.8.0] - 2026-10-23 — Persistent Approval + Task Resume
 
 ### Added

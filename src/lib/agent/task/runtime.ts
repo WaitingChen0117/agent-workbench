@@ -8,6 +8,7 @@ import {
   MAX_AGENT_STEPS,
   type AgentMessage,
   type AgentLoopEvent,
+  type AgentResult,
 } from "@/lib/agent/loop";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { getTaskStore } from "@/lib/agent/task/task-store";
@@ -20,6 +21,12 @@ import {
   getApprovalStore,
   type AgentApproval,
 } from "@/lib/agent/approval/approval-store";
+import { getSessionStore } from "@/lib/agent/session/session-store";
+import {
+  sanitizeMessageContent,
+  sanitizePendingInput,
+  type SessionStatus,
+} from "@/lib/agent/session/types";
 import { startTrace } from "@/lib/agent/trace/collector";
 import {
   sanitizeToolInput,
@@ -55,6 +62,77 @@ export interface RunTaskResult {
 
 // Runtime 只依赖 TaskStore 抽象，不直接操作 globalThis / Map
 const taskStore = getTaskStore();
+const sessionStore = getSessionStore();
+
+// ---------------------------------------------------------------------------
+// Agent Loop Runner seam（Phase 10.4）
+//
+// 生产默认 = streamAgent（真实 LLM）。通过依赖注入可替换为 deterministic stub
+// （仅用于 Evaluation，不改变生产语义）。executeTask 与 resume 共用同一个 runner，
+// 保证「恢复」走的就是「重新进入同一个 Agent Loop」，而不是另写一套。
+// ---------------------------------------------------------------------------
+export interface AgentLoopRunnerArgs {
+  taskId: string;
+  sessionId: string | null;
+  messages: AgentMessage[];
+  maxSteps: number;
+  tools: ToolSet;
+  instructions?: string;
+  onEvent: (event: AgentLoopEvent) => void;
+  abortSignal: AbortSignal;
+}
+
+export type AgentLoopRunner = (args: AgentLoopRunnerArgs) => Promise<AgentResult>;
+
+const defaultAgentLoopRunner: AgentLoopRunner = (args) =>
+  streamAgent({
+    messages: args.messages,
+    maxSteps: args.maxSteps,
+    tools: args.tools,
+    instructions: args.instructions,
+    abortSignal: args.abortSignal,
+    onEvent: args.onEvent,
+  });
+
+const runnerRef = globalThis as typeof globalThis & {
+  __agentLoopRunner?: AgentLoopRunner;
+};
+
+export function setAgentLoopRunner(runner: AgentLoopRunner | null): void {
+  if (runner) runnerRef.__agentLoopRunner = runner;
+  else delete runnerRef.__agentLoopRunner;
+}
+
+export function getAgentLoopRunner(): AgentLoopRunner {
+  return runnerRef.__agentLoopRunner ?? defaultAgentLoopRunner;
+}
+
+// task 状态 → session 状态；session 不存在则 no-op（如 Workflow 任务）
+function toSessionStatus(status: string): SessionStatus | null {
+  switch (status) {
+    case "running":
+      return "active";
+    case "waiting":
+      return "waiting";
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "cancelled":
+      return "cancelled";
+    default:
+      return null;
+  }
+}
+
+async function syncSessionStatus(taskId: string, taskStatus: string): Promise<void> {
+  const next = toSessionStatus(taskStatus);
+  if (!next) return;
+  const session = await sessionStore.getByTaskId(taskId);
+  if (session && session.status !== next) {
+    await sessionStore.update(session.sessionId, { status: next });
+  }
+}
 
 // 统一事件出口：落 Store（可选）并发布到 Event Bus
 export function emit(
@@ -203,6 +281,23 @@ export function wrapToolsWithPermissions(
       if ((await taskStore.get(ctx.taskId))?.status === "running") {
         await taskStore.transition(ctx.taskId, "waiting");
       }
+      // 记录「正在等待审批的 tool call」到 Session（脱敏入参），供跨进程 resume 使用。
+      // 真正 resume 执行所需的原始 input 从 ApprovalStore 读取，不在 Session 存文件全文。
+      const session = await sessionStore.getByTaskId(ctx.taskId);
+      if (session) {
+        const toolCallId =
+          (options as { toolCallId?: string } | undefined)?.toolCallId ??
+          `call-${approval.id}`;
+        await sessionStore.createPendingAction({
+          sessionId: session.sessionId,
+          taskId: ctx.taskId,
+          toolCallId,
+          toolName: name,
+          input: sanitizePendingInput(name, input),
+          approvalId: approval.id,
+        });
+        await sessionStore.update(session.sessionId, { status: "waiting" });
+      }
       emit(ctx.taskId, "approval.required", {
         approvalId: approval.id,
         toolName: name,
@@ -216,13 +311,16 @@ export function wrapToolsWithPermissions(
       if (status === "approved") {
         if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
           await taskStore.transition(ctx.taskId, "running");
+          await syncSessionStatus(ctx.taskId, "running");
         }
+        await sessionStore.updatePendingAction(approval.id, "completed");
         return originalExecute(input, options);
       }
 
       // rejected：取消任务并中止 Agent Loop
       if ((await taskStore.get(ctx.taskId))?.status === "waiting") {
         await taskStore.transition(ctx.taskId, "cancelled");
+        await syncSessionStatus(ctx.taskId, "cancelled");
         emit(ctx.taskId, "task.cancelled", { reason: "approval rejected" });
       }
       ctx.abortController.abort();
@@ -238,21 +336,16 @@ export function wrapToolsWithPermissions(
   return wrapped;
 }
 
-// 执行一个已创建的 Task：pending → running →（可选 waiting）→ completed / failed / cancelled
-async function executeTask(taskId: string): Promise<void> {
-  const task = await taskStore.get(taskId);
-
-  if (!task) {
-    return;
-  }
-
-  await taskStore.transition(taskId, "running");
-  emit(taskId, "task.started");
-
+// 构建已 gate 的工具集 + Skill 指令，调用可注入的 Agent Loop runner，并统一收尾。
+// 首次执行与 resume 后的「重新进入 Agent Loop」都走这里，不复制第二套 Loop。
+async function runAgentLoopForTask(
+  taskId: string,
+  sessionId: string | null,
+  messages: AgentMessage[],
+  maxSteps: number,
+): Promise<void> {
   const abortController = new AbortController();
-
   try {
-    // 解析统一工具集（Local + MCP），再包一层 Permission Gate；加载 Skill 指令
     const [baseTools, instructions] = await Promise.all([
       resolveTools(),
       loadSkillInstructions(),
@@ -263,39 +356,84 @@ async function executeTask(taskId: string): Promise<void> {
       abortController,
     });
 
-    const result = await streamAgent({
-      messages: task.messages,
-      maxSteps: task.maxSteps,
+    const result = await getAgentLoopRunner()({
+      taskId,
+      sessionId,
+      messages,
+      maxSteps,
       tools,
       instructions,
       abortSignal: abortController.signal,
       onEvent: makeLoopEventHandler(taskId),
     });
 
-    // 仅当仍在 running 时收尾为 completed（可能已被 reject 置为 cancelled）
+    // 仅当仍在 running 时收尾为 completed（可能已被 reject 置为 cancelled，
+    // 或因下一个 approval 进入 waiting —— 那种情况 runner 不会正常返回）。
     if ((await taskStore.get(taskId))?.status === "running") {
       await taskStore.update(taskId, {
         answer: result.answer,
         currentStep: result.steps,
       });
+      if (sessionId && result.answer) {
+        await sessionStore.appendMessage(sessionId, {
+          role: "assistant",
+          content: sanitizeMessageContent(result.answer),
+        });
+      }
       await taskStore.transition(taskId, "completed");
+      await syncSessionStatus(taskId, "completed");
       emit(taskId, "task.completed", { steps: result.steps });
     }
   } catch (error) {
-    // 已被 reject 等终态化则不再处理（幂等）
     if ((await taskStore.get(taskId))?.status !== "running") {
       return;
     }
-
     const code =
       error instanceof AgentLoopLimitError ? "AGENT_LOOP_LIMIT" : "AGENT_ERROR";
     const message =
       error instanceof Error ? error.message : "Agent execution failed";
-
     await taskStore.update(taskId, { error: { code, message } });
     await taskStore.transition(taskId, "failed");
+    await syncSessionStatus(taskId, "failed");
     emit(taskId, "task.failed", { code, message });
   }
+}
+
+// 执行一个已创建的 Task：pending → running →（可选 waiting）→ completed / failed / cancelled
+async function executeTask(taskId: string): Promise<void> {
+  const task = await taskStore.get(taskId);
+
+  if (!task) {
+    return;
+  }
+
+  await taskStore.transition(taskId, "running");
+  await syncSessionStatus(taskId, "running");
+  emit(taskId, "task.started");
+
+  const session = await sessionStore.getByTaskId(taskId);
+  await runAgentLoopForTask(
+    taskId,
+    session?.sessionId ?? null,
+    task.messages,
+    task.maxSteps,
+  );
+}
+
+// Task 1:1 Session —— 创建 Task 的同时创建 Session 并落初始 user 消息（脱敏）。
+async function createTaskWithSession(
+  messages: AgentMessage[],
+  maxSteps: number,
+): Promise<AgentTask> {
+  const task = await taskStore.create({ messages, maxSteps });
+  const session = await sessionStore.create({ taskId: task.id });
+  for (const message of messages) {
+    await sessionStore.appendMessage(session.sessionId, {
+      role: message.role,
+      content: sanitizeMessageContent(message.content),
+    });
+  }
+  return task;
 }
 
 /**
@@ -306,7 +444,7 @@ export async function createAndStartTask({
   messages,
   maxSteps = MAX_AGENT_STEPS,
 }: RunTaskInput): Promise<AgentTask> {
-  const task = await taskStore.create({ messages, maxSteps });
+  const task = await createTaskWithSession(messages, maxSteps);
   startTrace(task.id); // 先订阅，保证捕获 task.created 之后的完整生命周期
   emit(task.id, "task.created");
 
@@ -324,7 +462,7 @@ export async function createAndRunTask({
   messages,
   maxSteps = MAX_AGENT_STEPS,
 }: RunTaskInput): Promise<RunTaskResult> {
-  const task = await taskStore.create({ messages, maxSteps });
+  const task = await createTaskWithSession(messages, maxSteps);
   startTrace(task.id);
   emit(task.id, "task.created");
 
@@ -380,27 +518,38 @@ export async function applyApprovalDecision(
 
   if (!hadWaiter) {
     if (action === "approve") {
-      await resumeApprovedTool(taskId, approval);
+      await resumeAgentSession(taskId, approval);
     } else {
-      await cancelWaitingTask(taskId);
+      await cancelWaitingTask(taskId, approval.id);
     }
   }
   return { ok: true, status: approval.status };
 }
 
-async function cancelWaitingTask(taskId: string): Promise<void> {
+async function cancelWaitingTask(
+  taskId: string,
+  approvalId: string,
+): Promise<void> {
   if ((await taskStore.get(taskId))?.status === "waiting") {
     await taskStore.transition(taskId, "cancelled");
+    await syncSessionStatus(taskId, "cancelled");
+    await sessionStore.updatePendingAction(approvalId, "completed");
     emit(taskId, "task.cancelled", { reason: "approval rejected" });
   }
 }
 
 /**
- * 进程重启后恢复：原进程的 LLM / Promise 已消失，这里不重跑已完成步骤、不重调 LLM，
- * 只把「被批准的那一个工具」安全地执行恰好一次（Resume 仍重新校验 guard，不绕过安全），
- * 然后收尾任务。Agent 的后续 LLM 对话无法跨进程续跑（未持久化会话，见技术债务）。
+ * Phase 10.4 —— 真正的 Full Resume（跨进程）。
+ *
+ * 原进程的 LLM / waiter Promise 已随重启消失。这里：
+ *  1. 重新执行 preApprovalGuard（Resume ≠ 绕过安全）；
+ *  2. 重新 resolveTools 确认工具仍存在、仍可执行；
+ *  3. 把「被批准的那个工具」安全地执行恰好一次（execute-once 由 ApprovalStore 原子 resolve 保证）；
+ *  4. 把工具结果作为消息追加回 Session；
+ *  5. 重新进入同一个 Agent Loop（而不是执行完工具就结束）——
+ *     LLM 再次推理，可能继续下一个工具（→ 新的 approval → 再次 waiting），直至 final answer。
  */
-async function resumeApprovedTool(
+async function resumeAgentSession(
   taskId: string,
   approval: AgentApproval,
 ): Promise<void> {
@@ -409,6 +558,7 @@ async function resumeApprovedTool(
     return;
   }
 
+  // 1. 安全校验必须重跑
   const guard = await preApprovalGuard(
     approval.toolName,
     approval.input,
@@ -416,29 +566,40 @@ async function resumeApprovedTool(
   );
   if (!guard.ok) {
     await taskStore.update(taskId, {
-      error: { code: "RESUME_DENIED", message: guard.error ?? "denied" },
+      error: { code: "RESUME_GUARD_DENIED", message: guard.error ?? "denied" },
     });
     await taskStore.transition(taskId, "failed");
-    emit(taskId, "task.failed", { code: "RESUME_DENIED", message: guard.error });
+    await syncSessionStatus(taskId, "failed");
+    emit(taskId, "task.failed", {
+      code: "RESUME_GUARD_DENIED",
+      message: guard.error,
+    });
     return;
   }
 
+  // 2. 工具仍需存在且可执行
   const tools = await resolveTools();
   const tool = tools[approval.toolName];
-  // Workflow 审批节点等「非本地工具」的 approval 无法跨进程 resume（会话/执行态未持久化，
-  // 见技术债务）。在产生任何副作用或状态流转前先失败收尾，不发 tool.started、不重复执行。
   if (!tool || typeof tool.execute !== "function") {
+    // 如 Workflow 审批节点等非本地工具：跨进程不可 resume（会话/执行态未持久化）。
+    // 在任何状态流转 / tool.started 之前失败收尾，不尝试任何副作用。
     const message = `resume unsupported: tool not found "${approval.toolName}"`;
     await taskStore.update(taskId, {
       error: { code: "RESUME_UNSUPPORTED", message },
     });
     await taskStore.transition(taskId, "failed");
+    await syncSessionStatus(taskId, "failed");
     emit(taskId, "task.failed", { code: "RESUME_UNSUPPORTED", message });
     return;
   }
 
-  await taskStore.transition(taskId, "running");
+  const session = await sessionStore.getByTaskId(taskId);
 
+  await taskStore.transition(taskId, "running");
+  await syncSessionStatus(taskId, "running");
+  await sessionStore.updatePendingAction(approval.id, "executing");
+
+  // 3. 执行被批准的工具恰好一次
   const step = (task.currentStep ?? 0) + 1;
   emit(taskId, "tool.started", {
     step,
@@ -452,24 +613,64 @@ async function resumeApprovedTool(
       toolCallId: `resume-${approval.id}`,
       messages: [],
     });
+    const success = (output as { success?: boolean })?.success !== false;
     emit(taskId, "tool.completed", {
       step,
       tool: approval.toolName,
-      success: (output as { success?: boolean })?.success !== false,
+      success,
       result: sanitizeToolOutput(approval.toolName, output),
     });
-    await taskStore.update(taskId, {
-      answer: `[resumed] ${approval.toolName} executed once after restart`,
-      currentStep: step,
-    });
-    await taskStore.transition(taskId, "completed");
-    emit(taskId, "task.completed", { resumed: true });
+    await sessionStore.updatePendingAction(approval.id, "completed");
+    await taskStore.update(taskId, { currentStep: step });
+
+    // 4. 工具结果回写 Session（脱敏），作为 Agent Loop 继续推理的上下文
+    if (session) {
+      await sessionStore.appendMessage(session.sessionId, {
+        role: "assistant",
+        content: `[tool-call] ${approval.toolName}`,
+      });
+      await sessionStore.appendMessage(session.sessionId, {
+        role: "user",
+        content: sanitizeMessageContent(
+          `[tool-result:${approval.toolName}] ${JSON.stringify(
+            sanitizeToolOutput(approval.toolName, output),
+          )}`,
+        ),
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "resume tool failed";
     await taskStore.update(taskId, {
       error: { code: "RESUME_TOOL_ERROR", message },
     });
     await taskStore.transition(taskId, "failed");
+    await syncSessionStatus(taskId, "failed");
     emit(taskId, "task.failed", { code: "RESUME_TOOL_ERROR", message });
+    return;
   }
+
+  // 5. 重新进入同一个 Agent Loop（后台执行，不阻塞决策返回）。
+  //    若 LLM 再次请求 approval_required 工具，会再次进入 waiting + 新 pending action。
+  void reenterAgentLoop(taskId);
+}
+
+// 用「当前 Session 的完整消息历史」重新进入 Agent Loop。无 Session 时回退到 task.messages。
+async function reenterAgentLoop(taskId: string): Promise<void> {
+  const task = await taskStore.get(taskId);
+  if (!task || task.status !== "running") return;
+
+  const session = await sessionStore.getByTaskId(taskId);
+  const messages: AgentMessage[] = session
+    ? (await sessionStore.getMessages(session.sessionId)).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+    : task.messages;
+
+  await runAgentLoopForTask(
+    taskId,
+    session?.sessionId ?? null,
+    messages,
+    task.maxSteps,
+  );
 }

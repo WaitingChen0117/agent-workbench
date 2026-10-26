@@ -1,0 +1,18 @@
+{
+  "cases": [
+    { "id": "session-create", "kind": "session-create" },
+    { "id": "session-message-persist", "kind": "session-message-persist" },
+    { "id": "session-message-order", "kind": "session-message-order" },
+    { "id": "session-task-relation", "kind": "session-task-relation" },
+    { "id": "session-approval-pending", "kind": "session-approval-pending" },
+    { "id": "session-restart-persistence", "kind": "session-restart-persistence" },
+    { "id": "session-recovery-waiting", "kind": "session-recovery-waiting" },
+    { "id": "session-resume-write", "kind": "session-resume-write" },
+    { "id": "session-resume-git-add", "kind": "session-resume-git-add" },
+    { "id": "session-resume-git-push", "kind": "session-resume-git-push" },
+    { "id": "session-multiple-approvals", "kind": "session-multiple-approvals" },
+    { "id": "session-reject", "kind": "session-reject" },
+    { "id": "session-execute-once", "kind": "session-execute-once" },
+    { "id": "session-full-resume", "kind": "session-full-resume" }
+  ]
+}

@@ -58,8 +58,21 @@ async function main(): Promise<void> {
     const action = process.argv[3] as "approve" | "reject";
     const taskId = process.argv[4];
     const approvalId = process.argv[5];
-    const { applyApprovalDecision } = await import("@/lib/agent/task/runtime");
-    const result = await applyApprovalDecision(taskId, approvalId, action);
+    const runtime = await import("@/lib/agent/task/runtime");
+    // Phase 10.4：resume 会重新进入 Agent Loop。这里注入一个「只给最终答案」的 stub
+    // runner，使被批准的工具执行一次后 Loop 立即收尾 —— 保持本评测确定、无需网络。
+    runtime.setAgentLoopRunner(async (args) => {
+      args.onEvent({ type: "agent.step.started", step: (args.messages.length ?? 0) + 1 });
+      return { answer: "resumed and finished", toolCalls: [], steps: 1 };
+    });
+    const result = await runtime.applyApprovalDecision(taskId, approvalId, action);
+    // reenterAgentLoop 是后台执行，等任务离开 running 再退出
+    const store = (await import("@/lib/agent/task/task-store")).getTaskStore();
+    for (let i = 0; i < 200; i += 1) {
+      const t = await store.get(taskId);
+      if (t && ["waiting", "completed", "failed", "cancelled"].includes(t.status)) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
     console.log(JSON.stringify(result));
   } else {
     console.error("unknown mode");
