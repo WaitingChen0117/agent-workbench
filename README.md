@@ -15,11 +15,12 @@
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
 - **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。默认仍是进程内内存；设置 `AGENT_TASK_STORE=sqlite` 后写入 `.data/agent.sqlite`。重启时 `running` 收成 failed，不重新执行。
-- **Approval**：审批状态可单独持久化（`AGENT_APPROVAL_STORE=sqlite`，与任务同一个库）。两边都打开时，未决审批的任务保持等待；重启后批准会再校验一次，并只执行那一个工具。
+- **Approval**：审批状态可单独持久化（`AGENT_APPROVAL_STORE=sqlite`，与任务同一个库）。有未决审批时，重启后任务保持等待。
+- **Session**：每个任务有一份对话历史（`AGENT_SESSION_STORE=sqlite`）。三个存储都打开时，重启后批准会先执行那一个工具，再重新进入同一个 Agent Loop。`writeFile` 的正文不写入 Session。
 
 ## 架构演进
 
-当前版本是 **v1.8.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.9.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -52,8 +53,11 @@ flowchart TB
   approval --> waiter["ApprovalWaiter"]
   waiter -->|同进程批准| resolver
   decision["applyApprovalDecision"] --> apprStore
-  decision -->|无 waiter| resume["只执行该工具一次"]
+  decision -->|无 waiter| resume["执行该工具一次"]
   resume --> guard
+  resume --> sess["SessionStore"]
+  resume --> reenter["重新进入 Agent Loop"]
+  reenter --> agent
   apprStore -->|默认| apprMem["MemoryApprovalStore"]
   apprStore -->|sqlite| apprSql["SQLiteApprovalStore"]
   approval -->|拒绝| cancel["任务取消"]
@@ -76,9 +80,15 @@ flowchart TB
   store -->|sqlite| sqlite["SQLiteTaskStore"]
   sqlite --> db[".data/agent.sqlite"]
   apprSql --> db
+  runtime --> sess
+  sess -->|默认| sessMem["MemorySessionStore"]
+  sess -->|sqlite| sessSql["SQLiteSessionStore"]
+  sessSql --> db
+  getSess["GET /tasks/:taskId/session"] --> sess
   boot["进程启动"] --> recover["recoverTasks"]
   recover --> store
   recover --> apprStore
+  recover --> sess
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
@@ -100,6 +110,7 @@ flowchart TB
 | v1.6.0 Task Persistence | 任务状态和事件经 TaskStore 读写；实现仍是进程内内存，重启后不保留 |
 | v1.7.0 SQLite | 可选把任务和事件写入 SQLite；重启后 running / waiting 收成 failed，不续跑、不自动批准 |
 | v1.8.0 审批持久化 | 未决审批可跨重启保留；批准后重新校验，并只补执行那一个工具 |
+| v1.9.0 Session | 对话历史可写入 SQLite；重启后批准会执行工具并重新进入 Agent Loop |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -160,6 +171,7 @@ pnpm git:push:evaluate  # Git 推送回归评估
 pnpm task:persistence:evaluate  # 任务存储回归评估
 pnpm task:sqlite:evaluate  # SQLite 持久化与崩溃恢复评估
 pnpm approval:persistence:evaluate  # 审批持久化与跨进程恢复评估
+pnpm session:persistence:evaluate  # 会话持久化与完整恢复评估
 ```
 
 ## 目录结构
