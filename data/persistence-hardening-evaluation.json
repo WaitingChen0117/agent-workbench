@@ -1,0 +1,27 @@
+{
+  "cases": [
+    { "id": "migration-fresh-db", "kind": "migration-fresh-db" },
+    { "id": "migration-existing-db", "kind": "migration-existing-db" },
+    { "id": "migration-idempotent", "kind": "migration-idempotent" },
+    { "id": "migration-data-preserved", "kind": "migration-data-preserved" },
+    { "id": "migration-rollback", "kind": "migration-rollback" },
+    { "id": "trace-event-append", "kind": "trace-event-append" },
+    { "id": "trace-event-order", "kind": "trace-event-order" },
+    { "id": "trace-event-idempotent", "kind": "trace-event-idempotent" },
+    { "id": "trace-event-cross-process", "kind": "trace-event-cross-process" },
+    { "id": "trace-resume", "kind": "trace-resume" },
+    { "id": "cursor-valid", "kind": "cursor-valid" },
+    { "id": "cursor-tampered", "kind": "cursor-tampered" },
+    { "id": "cursor-resource-mismatch", "kind": "cursor-resource-mismatch" },
+    { "id": "cursor-malformed", "kind": "cursor-malformed" },
+    { "id": "cursor-pagination-consistency", "kind": "cursor-pagination-consistency" },
+    { "id": "cleanup-lease-acquire", "kind": "cleanup-lease-acquire" },
+    { "id": "cleanup-lease-takeover", "kind": "cleanup-lease-takeover" },
+    { "id": "cleanup-lease-renew", "kind": "cleanup-lease-renew" },
+    { "id": "cleanup-lease-owner-check", "kind": "cleanup-lease-owner-check" },
+    { "id": "persistence-health", "kind": "persistence-health" },
+    { "id": "persistence-metrics", "kind": "persistence-metrics" },
+    { "id": "failure-injection-rollback", "kind": "failure-injection-rollback" },
+    { "id": "full-regression", "kind": "full-regression" }
+  ]
+}

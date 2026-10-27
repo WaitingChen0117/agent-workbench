@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getApprovalStore } from "@/lib/agent/approval/approval-store";
@@ -6,6 +7,7 @@ import { getSessionStore } from "@/lib/agent/session/session-store";
 import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import { getTraceStore } from "@/lib/agent/trace/trace-store";
 import { tx } from "@/lib/agent/persistence/sqlite-util";
+import { incrementPersistenceMetric } from "@/lib/agent/persistence/metrics";
 
 /**
  * Persistence Cleanup / TTL（Phase 10.6-D）
@@ -39,37 +41,74 @@ export function getPersistenceCleanupConfig(): PersistenceCleanupConfig {
   };
 }
 
-const LOCK_STALE_MS = 60_000;
+const LEASE_MS = 30_000;
 
-// 轻量 SQLite 锁：避免多进程同时 cleanup。Memory 后端（无 DB 路径）直接视为已获得。
-function acquireCleanupLock(nowMs: number): { db: DatabaseSync; ok: boolean } | null {
+export interface CleanupLease {
+  db: DatabaseSync;
+  ownerId: string;
+  ok: boolean;
+}
+
+function ensureLockTable(db: DatabaseSync): void {
+  db.exec(
+    `CREATE TABLE IF NOT EXISTS agent_persistence_locks (
+       name TEXT PRIMARY KEY, acquired_at INTEGER, owner_id TEXT, expires_at INTEGER
+     )`,
+  );
+  const cols = (
+    db.prepare("PRAGMA table_info(agent_persistence_locks)").all() as Array<{ name: string }>
+  ).map((c) => c.name);
+  if (!cols.includes("owner_id")) db.exec("ALTER TABLE agent_persistence_locks ADD COLUMN owner_id TEXT");
+  if (!cols.includes("expires_at")) db.exec("ALTER TABLE agent_persistence_locks ADD COLUMN expires_at INTEGER");
+}
+
+// 可续约租约锁：新建 / 过期接管 / 他人持有未过期 → locked。
+export function acquireCleanupLock(nowMs: number): CleanupLease | null {
   const dbPath = process.env.AGENT_TASK_DB_PATH;
   if (!dbPath || process.env.AGENT_TASK_STORE !== "sqlite") return null;
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA journal_mode = WAL;");
-  db.exec(
-    "CREATE TABLE IF NOT EXISTS agent_persistence_locks (name TEXT PRIMARY KEY, acquired_at INTEGER NOT NULL)",
-  );
+  ensureLockTable(db);
+  const ownerId = randomUUID();
   const ok = tx(db, () => {
     const row = db
-      .prepare("SELECT acquired_at FROM agent_persistence_locks WHERE name = 'cleanup'")
-      .get() as { acquired_at?: number } | undefined;
+      .prepare("SELECT owner_id, expires_at FROM agent_persistence_locks WHERE name = 'cleanup'")
+      .get() as { owner_id?: string; expires_at?: number } | undefined;
     if (!row) {
-      db.prepare("INSERT INTO agent_persistence_locks (name, acquired_at) VALUES ('cleanup', ?)").run(nowMs);
+      db.prepare(
+        "INSERT INTO agent_persistence_locks (name, acquired_at, owner_id, expires_at) VALUES ('cleanup', ?, ?, ?)",
+      ).run(nowMs, ownerId, nowMs + LEASE_MS);
       return true;
     }
-    if (nowMs - (row.acquired_at ?? 0) > LOCK_STALE_MS) {
-      db.prepare("UPDATE agent_persistence_locks SET acquired_at = ? WHERE name = 'cleanup'").run(nowMs);
-      return true;
+    if ((row.expires_at ?? 0) < nowMs) {
+      db.prepare(
+        "UPDATE agent_persistence_locks SET acquired_at = ?, owner_id = ?, expires_at = ? WHERE name = 'cleanup'",
+      ).run(nowMs, ownerId, nowMs + LEASE_MS);
+      return true; // 接管已过期租约
     }
-    return false;
+    return false; // 他人持有且未过期
   });
-  return { db, ok };
+  return { db, ownerId, ok };
 }
 
-function releaseCleanupLock(db: DatabaseSync): void {
+function renewCleanupLock(lease: CleanupLease, nowMs: number): void {
+  lease.db
+    .prepare(
+      "UPDATE agent_persistence_locks SET expires_at = ? WHERE name = 'cleanup' AND owner_id = ?",
+    )
+    .run(nowMs + LEASE_MS, lease.ownerId);
+}
+
+export function renewCleanupLockForTest(lease: CleanupLease, nowMs: number): void {
+  renewCleanupLock(lease, nowMs);
+}
+
+export function releaseCleanupLock(lease: CleanupLease): void {
   try {
-    db.prepare("DELETE FROM agent_persistence_locks WHERE name = 'cleanup'").run();
+    // 仅 owner 匹配才释放，避免误删他人接管后的租约
+    lease.db
+      .prepare("DELETE FROM agent_persistence_locks WHERE name = 'cleanup' AND owner_id = ?")
+      .run(lease.ownerId);
   } catch {
     /* best-effort */
   }
@@ -95,23 +134,27 @@ export async function cleanupExpiredData(
   const ttlDays = options.ttlDays ?? getTtlDays();
   const nowMs = options.nowMs ?? new Date().getTime();
 
-  let lockDb: DatabaseSync | null = null;
+  let lease: CleanupLease | null = null;
   if (options.lock) {
-    const lock = acquireCleanupLock(nowMs);
-    if (lock && !lock.ok) {
+    lease = acquireCleanupLock(nowMs);
+    if (lease && !lease.ok) {
+      incrementPersistenceMetric("cleanupSkipped");
       return { scannedTasks: 0, deletedTasks: 0, keptTasks: 0, tracesDeleted: 0, locked: true };
     }
-    lockDb = lock?.db ?? null;
   }
 
   try {
-    return await runCleanup(ttlDays, nowMs);
+    return await runCleanup(ttlDays, nowMs, lease);
   } finally {
-    if (lockDb) releaseCleanupLock(lockDb);
+    if (lease) releaseCleanupLock(lease);
   }
 }
 
-async function runCleanup(ttlDays: number, nowMs: number): Promise<CleanupResult> {
+async function runCleanup(
+  ttlDays: number,
+  nowMs: number,
+  lease: CleanupLease | null,
+): Promise<CleanupResult> {
   const cutoffMs = nowMs - ttlDays * DAY_MS;
   const cutoffIso = new Date(cutoffMs).toISOString();
 
@@ -145,6 +188,7 @@ async function runCleanup(ttlDays: number, nowMs: number): Promise<CleanupResult
       (session && (session.status === "waiting" || session.status === "active"))
     ) {
       kept += 1;
+      incrementPersistenceMetric("cleanupSkipped");
       continue;
     }
 
@@ -157,7 +201,12 @@ async function runCleanup(ttlDays: number, nowMs: number): Promise<CleanupResult
     if (wf) await execStore.delete(wf.executionId);
     await taskStore.delete(task.id);
     deleted += 1;
+    incrementPersistenceMetric("cleanupDeleted");
+    // 长时间 cleanup 期间续约，避免被第二个进程接管
+    if (lease && deleted % 50 === 0) renewCleanupLock(lease, new Date().getTime());
   }
+
+  if (lease) renewCleanupLock(lease, new Date().getTime());
 
   // 清理没有对应 Task 的历史 Trace（按 TTL）
   const tracesDeleted = traceStore.cleanupTerminalBefore(cutoffIso);

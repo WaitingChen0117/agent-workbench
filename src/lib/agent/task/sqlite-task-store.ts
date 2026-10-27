@@ -11,6 +11,7 @@ import {
   type ListOptions,
   type PageResult,
 } from "@/lib/agent/persistence/pagination";
+import { incrementPersistenceMetric } from "@/lib/agent/persistence/metrics";
 import type {
   CreateTaskInput,
   TaskPatch,
@@ -126,6 +127,7 @@ export class SQLiteTaskStore implements TaskStore {
         task.createdAt,
         task.updatedAt,
       );
+    incrementPersistenceMetric("taskCreates");
     return task;
   }
 
@@ -202,7 +204,7 @@ export class SQLiteTaskStore implements TaskStore {
 
   async listPage(options: ListOptions): Promise<PageResult<AgentTask>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ u: string; id: string }>("task", options.cursor);
     const rows = (
       cursor
         ? this.db
@@ -221,7 +223,7 @@ export class SQLiteTaskStore implements TaskStore {
     return {
       items: page,
       nextCursor:
-        hasMore && last ? encodeCursor({ u: last.updatedAt, id: last.id }) : undefined,
+        hasMore && last ? encodeCursor("task", { u: last.updatedAt, id: last.id }) : undefined,
     };
   }
 

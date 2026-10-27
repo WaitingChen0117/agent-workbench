@@ -119,14 +119,14 @@ class MemorySessionStore implements SessionStore {
     options: ListOptions,
   ): Promise<PageResult<AgentSessionMessage>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ offset: number }>(options.cursor);
+    const cursor = decodeCursor<{ offset: number }>("session-msg", options.cursor);
     const all = this.s.messages.get(sessionId) ?? [];
     const offset = cursor?.offset ?? 0;
     const items = all.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return {
       items,
-      nextCursor: nextOffset < all.length ? encodeCursor({ offset: nextOffset }) : undefined,
+      nextCursor: nextOffset < all.length ? encodeCursor("session-msg", { offset: nextOffset }) : undefined,
     };
   }
   async createPendingAction(

@@ -1,6 +1,7 @@
 import type {
   AgentTrace,
   AgentTraceStep,
+  TraceEvent,
   TraceStatus,
 } from "@/lib/agent/trace/types";
 import {
@@ -10,6 +11,7 @@ import {
   type ListOptions,
   type PageResult,
 } from "@/lib/agent/persistence/pagination";
+import { incrementPersistenceMetric } from "@/lib/agent/persistence/metrics";
 import { SQLiteTraceStore } from "@/lib/agent/trace/sqlite-trace-store";
 
 /**
@@ -38,6 +40,9 @@ export interface TraceStore {
     patch: { status?: TraceStatus; endedAt?: string },
   ): void;
   putTrace(trace: AgentTrace): void; // 兼容层
+  // append-only 事件日志（Phase 10.8-B）：source of truth；按 (traceId,eventId) 幂等
+  appendTraceEvent(traceId: string, event: TraceEvent): void;
+  getEvents(traceId: string): TraceEvent[];
   getByTaskId(taskId: string): AgentTrace | null;
   listByWorkflowExecutionId(executionId: string): AgentTraceStep[];
   listByWorkflowNodeId(executionId: string, nodeId: string): AgentTraceStep[];
@@ -50,18 +55,32 @@ const TERMINAL = new Set(["completed", "failed", "cancelled"]);
 
 interface MemState {
   headers: Map<string, AgentTrace>; // taskId -> trace (steps inline)
+  events: Map<string, TraceEvent[]>; // traceId -> append-only events
 }
 
 class MemoryTraceStore implements TraceStore {
   private readonly s: MemState;
   constructor() {
     const g = globalThis as typeof globalThis & { __agentTraceMem?: MemState };
-    this.s = g.__agentTraceMem ?? (g.__agentTraceMem = { headers: new Map() });
+    this.s =
+      g.__agentTraceMem ??
+      (g.__agentTraceMem = { headers: new Map(), events: new Map() });
   }
 
   createTrace(header: TraceHeader): void {
     if (this.s.headers.has(header.taskId)) return; // 幂等
     this.s.headers.set(header.taskId, { ...header, steps: [] });
+  }
+
+  appendTraceEvent(traceId: string, event: TraceEvent): void {
+    const list = this.s.events.get(traceId) ?? [];
+    if (list.some((e) => e.eventId === event.eventId)) return; // 幂等
+    list.push({ ...event, sequence: list.length + 1 });
+    this.s.events.set(traceId, list);
+    incrementPersistenceMetric("traceEventsAppended");
+  }
+  getEvents(traceId: string): TraceEvent[] {
+    return [...(this.s.events.get(traceId) ?? [])].sort((a, b) => a.sequence - b.sequence);
   }
   appendStep(taskId: string, step: AgentTraceStep): void {
     const trace = this.s.headers.get(taskId);
@@ -102,7 +121,7 @@ class MemoryTraceStore implements TraceStore {
   }
   listPage(options: ListOptions): PageResult<AgentTrace> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ started: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ started: string; id: string }>("trace", options.cursor);
     const all = [...this.s.headers.values()].sort(
       (a, b) => (a.startedAt < b.startedAt ? 1 : a.startedAt > b.startedAt ? -1 : a.traceId < b.traceId ? 1 : -1),
     );
@@ -113,11 +132,13 @@ class MemoryTraceStore implements TraceStore {
     const items = all.slice(from, from + limit);
     const nextCursor =
       from + limit < all.length
-        ? encodeCursor({ started: items[items.length - 1].startedAt, id: items[items.length - 1].traceId })
+        ? encodeCursor("trace", { started: items[items.length - 1].startedAt, id: items[items.length - 1].traceId })
         : undefined;
     return { items: items.map((t) => ({ ...t, steps: [] })), nextCursor };
   }
   delete(taskId: string): void {
+    const t = this.s.headers.get(taskId);
+    if (t) this.s.events.delete(t.traceId);
     this.s.headers.delete(taskId);
   }
   cleanupTerminalBefore(cutoffIso: string): number {

@@ -231,6 +231,7 @@ export async function initializeAgentRuntime(): Promise<RecoveryResult | null> {
   globalRef.__agentRuntimeInitialized = true;
 
   try {
+    await maybeMigrateDatabase();
     const result = await recoverTasks();
     console.log(
       `[agent-recovery] scanned=${result.scanned} running=${result.running} waiting=${result.waiting} recovered=${result.recovered} keptWaiting=${result.keptWaiting} skipped=${result.skipped}`,
@@ -243,6 +244,28 @@ export async function initializeAgentRuntime(): Promise<RecoveryResult | null> {
       error instanceof Error ? error.message : "unknown error",
     );
     return null;
+  }
+}
+
+// 启动时迁移 SQLite schema（Phase 10.8-A）；仅在使用 sqlite 后端时。幂等、失败不致命。
+async function maybeMigrateDatabase(): Promise<void> {
+  const dbPath = process.env.AGENT_TASK_DB_PATH;
+  const usesSqlite =
+    process.env.AGENT_TASK_STORE === "sqlite" ||
+    process.env.AGENT_APPROVAL_STORE === "sqlite" ||
+    process.env.AGENT_SESSION_STORE === "sqlite" ||
+    process.env.AGENT_WORKFLOW_EXECUTION_STORE === "sqlite" ||
+    process.env.AGENT_TRACE_STORE === "sqlite";
+  if (!dbPath || !usesSqlite) return;
+  try {
+    const { migrateDatabase } = await import("@/lib/agent/persistence/migrations");
+    const r = migrateDatabase(dbPath);
+    console.log(`[agent-migrate] from=${r.from} to=${r.to} applied=[${r.applied.join(",")}]`);
+  } catch (error) {
+    console.error(
+      "[agent-migrate] failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
   }
 }
 

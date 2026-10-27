@@ -4,6 +4,8 @@ import { DatabaseSync } from "node:sqlite";
 
 import { redactSecrets } from "@/lib/agent/trace/sanitize";
 import { withBusyRetry, tx } from "@/lib/agent/persistence/sqlite-util";
+import { incrementPersistenceMetric } from "@/lib/agent/persistence/metrics";
+import { maybeThrowInjectedFailure } from "@/lib/agent/persistence/test-failure";
 import {
   clampLimit,
   decodeCursor,
@@ -14,6 +16,7 @@ import {
 import type {
   AgentTrace,
   AgentTraceStep,
+  TraceEvent,
   TraceStatus,
   TraceStepType,
 } from "@/lib/agent/trace/types";
@@ -111,7 +114,75 @@ export class SQLiteTraceStore implements TraceStore {
       CREATE INDEX IF NOT EXISTS idx_trace_steps_task ON agent_trace_steps(task_id);
       CREATE INDEX IF NOT EXISTS idx_trace_steps_exec ON agent_trace_steps(execution_id);
       CREATE INDEX IF NOT EXISTS idx_trace_steps_node ON agent_trace_steps(execution_id, node_id);
+      CREATE TABLE IF NOT EXISTS agent_trace_events (
+        trace_id TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        event_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        type TEXT NOT NULL,
+        payload TEXT,
+        workflow_id TEXT,
+        execution_id TEXT,
+        node_id TEXT,
+        PRIMARY KEY (trace_id, sequence),
+        UNIQUE (trace_id, event_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_trace_events_exec ON agent_trace_events(execution_id);
     `);
+  }
+
+  // append-only 事件：原子 sequence（MAX+1）+ (trace_id,event_id) 幂等。
+  appendTraceEvent(traceId: string, event: TraceEvent): void {
+    const payload =
+      event.payload !== undefined ? JSON.stringify(redactSecrets(event.payload)) : null;
+    const inserted = tx(this.db, () => {
+      maybeThrowInjectedFailure("trace-append");
+      const exists = this.db
+        .prepare("SELECT 1 FROM agent_trace_events WHERE trace_id = ? AND event_id = ?")
+        .get(traceId, event.eventId);
+      if (exists) return false;
+      const { next } = this.db
+        .prepare("SELECT COALESCE(MAX(sequence),0)+1 AS next FROM agent_trace_events WHERE trace_id = ?")
+        .get(traceId) as { next: number };
+      this.db
+        .prepare(
+          `INSERT INTO agent_trace_events (trace_id, sequence, event_id, timestamp, type, payload, workflow_id, execution_id, node_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          traceId, next, event.eventId, event.timestamp, event.type, payload,
+          event.workflowId ?? null, event.executionId ?? null, event.nodeId ?? null,
+        );
+      return true;
+    });
+    if (inserted) incrementPersistenceMetric("traceEventsAppended");
+  }
+
+  getEvents(traceId: string): TraceEvent[] {
+    const rows = this.db
+      .prepare("SELECT * FROM agent_trace_events WHERE trace_id = ? ORDER BY sequence ASC")
+      .all(traceId) as Array<{
+      trace_id: string;
+      sequence: number;
+      event_id: string;
+      timestamp: string;
+      type: string;
+      payload: string | null;
+      workflow_id: string | null;
+      execution_id: string | null;
+      node_id: string | null;
+    }>;
+    return rows.map((r) => ({
+      traceId: r.trace_id,
+      sequence: r.sequence,
+      eventId: r.event_id,
+      timestamp: r.timestamp,
+      type: r.type,
+      payload: r.payload ? JSON.parse(r.payload) : undefined,
+      workflowId: r.workflow_id ?? undefined,
+      executionId: r.execution_id ?? undefined,
+      nodeId: r.node_id ?? undefined,
+    }));
   }
 
   createTrace(header: TraceHeader): void {
@@ -224,7 +295,7 @@ export class SQLiteTraceStore implements TraceStore {
 
   listPage(options: ListOptions): PageResult<AgentTrace> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ started: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ started: string; id: string }>("trace", options.cursor);
     const rows = (
       cursor
         ? this.db
@@ -250,7 +321,7 @@ export class SQLiteTraceStore implements TraceStore {
     const last = page[page.length - 1];
     return {
       items,
-      nextCursor: hasMore && last ? encodeCursor({ started: last.started_at, id: last.trace_id }) : undefined,
+      nextCursor: hasMore && last ? encodeCursor("trace", { started: last.started_at, id: last.trace_id }) : undefined,
     };
   }
 
@@ -262,6 +333,7 @@ export class SQLiteTraceStore implements TraceStore {
       this.db.prepare("DELETE FROM agent_traces WHERE task_id = ?").run(taskId);
       if (header?.trace_id) {
         this.db.prepare("DELETE FROM agent_trace_steps WHERE trace_id = ?").run(header.trace_id);
+        this.db.prepare("DELETE FROM agent_trace_events WHERE trace_id = ?").run(header.trace_id);
       }
     });
   }

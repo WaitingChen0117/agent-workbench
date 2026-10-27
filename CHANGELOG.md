@@ -15,6 +15,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.13.0] - 2026-10-27 — Persistence Hardening + Observability
+
+### Added
+
+- SQLite schema migration (`persistence/migrations.ts`): `agent_schema_meta` + `agent_schema_migrations`; `getSchemaVersion` / `migrateDatabase` (idempotent, each migration in a transaction, rollback on failure). Migrations v1 baseline, v2 `agent_trace_events`, v3 cleanup-lease columns. Run at startup for SQLite; schema version is independent of package.json version.
+- Append-only Trace event log (`agent_trace_events`, source of truth): `TraceStore.appendTraceEvent` (SQLite-atomic sequence, idempotent by `(trace_id,event_id)`) + `getEvents`. Collector appends one event per `AgentTaskEvent`; steps remain a derived view.
+- Signed pagination cursors: `encodeCursor(resource,data)` / `decodeCursor(resource,cursor)` = `base64url(payload).HMAC-SHA256`; `AGENT_PERSISTENCE_CURSOR_SECRET` (stable local fallback in dev, never persisted/logged/returned). Tamper / resource-mismatch / version / malformed → `InvalidCursorError` (no fallback to full scan). `isCursorSigningConfigured()`.
+- Cleanup lease: `agent_persistence_locks` gains `owner_id`/`expires_at`; acquire (new / expired-takeover / locked), renew during long cleanup, release only on owner match.
+- Persistence health extended: `schema{version,latest,migrationPending}`, `cursorSigningConfigured`, `cleanupLock{held,expiresAt}`, process metrics snapshot.
+- Persistence metrics (`persistence/metrics.ts`): in-process counters (task creates, trace events appended, cleanup deleted/skipped, …); never persisted.
+- Failure-injection seam (`persistence/test-failure.ts`, `AGENT_PERSISTENCE_TEST_FAILURE`, default off) for deterministic rollback tests.
+- Evaluation: `persistence:hardening:evaluate` (23 cases) + `data/persistence-hardening-evaluation.json`.
+
+### Changed
+
+- Trace collector appends to the append-only event log in addition to the derived steps; cross-process `resumeTrace` continues the same trace with SQLite-assigned contiguous sequence.
+- `cleanupExpiredData({lock})` uses the renewable lease and records cleanup metrics.
+- All store `listPage` / `getMessagesPage` now use signed, resource-scoped cursors.
+
+### Security
+
+- Cursor secret, owner ids, tokens, authorization, passwords, api keys and full DB paths are never returned by health or written to DB/Trace/logs; health exposes only a path basename and a boolean `cursorSigningConfigured`.
+- Each migration and the append-only event write run in a transaction and roll back on failure (no half-applied schema, no partial event); busy retry stays bounded.
+- Cleanup still deletes only terminal data past the TTL cutoff (default off); lease owner-check prevents a process from releasing another's lock.
+- No new infrastructure: Node `node:sqlite` + existing Event Bus only; git push stays mocked in evaluation.
+
 ## [1.12.0] - 2026-10-27 — Persistence Reliability + Incremental Trace + Cleanup
 
 ### Added

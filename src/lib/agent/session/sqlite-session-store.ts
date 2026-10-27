@@ -218,7 +218,7 @@ export class SQLiteSessionStore implements SessionStore {
     options: ListOptions,
   ): Promise<PageResult<AgentSessionMessage>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ seq: number }>(options.cursor);
+    const cursor = decodeCursor<{ seq: number }>("session-msg", options.cursor);
     const rows = this.db
       .prepare(
         `SELECT sequence, message_id, role, payload, created_at FROM agent_session_messages
@@ -238,7 +238,7 @@ export class SQLiteSessionStore implements SessionStore {
     const last = page[page.length - 1];
     return {
       items,
-      nextCursor: hasMore && last ? encodeCursor({ seq: last.sequence }) : undefined,
+      nextCursor: hasMore && last ? encodeCursor("session-msg", { seq: last.sequence }) : undefined,
     };
   }
 

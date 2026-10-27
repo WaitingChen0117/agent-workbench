@@ -116,7 +116,7 @@ class MemoryWorkflowExecutionStore implements WorkflowExecutionStore {
   }
   async listPage(options: ListOptions): Promise<PageResult<WorkflowExecution>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ u: string; id: string }>("workflow-exec", options.cursor);
     const key = (e: WorkflowExecution) => e.updatedAt ?? e.startedAt;
     const sorted = [...this.s.executions.values()].sort((a, b) =>
       key(a) < key(b) ? 1 : key(a) > key(b) ? -1 : a.executionId < b.executionId ? 1 : -1,
@@ -132,7 +132,7 @@ class MemoryWorkflowExecutionStore implements WorkflowExecutionStore {
       items,
       nextCursor:
         filtered.length > limit && last
-          ? encodeCursor({ u: key(last), id: last.executionId })
+          ? encodeCursor("workflow-exec", { u: key(last), id: last.executionId })
           : undefined,
     };
   }

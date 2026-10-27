@@ -16,6 +16,24 @@ function main(): void {
     console.log(JSON.stringify({ ok: true, taskId: trace.taskId }));
     process.exit(0);
   }
+  if (mode === "append-events") {
+    // append-events <traceId> <count>
+    const traceId = process.argv[3];
+    const count = Number(process.argv[4] ?? 3);
+    const store = getTraceStore();
+    for (let i = 0; i < count; i += 1) {
+      store.appendTraceEvent(traceId, {
+        traceId,
+        sequence: 0,
+        eventId: `child-ev-${i}`,
+        timestamp: new Date(Date.parse("2026-01-01T00:00:00Z") + i * 1000).toISOString(),
+        type: "tool.started",
+        payload: { i },
+      });
+    }
+    console.log(JSON.stringify({ ok: true, traceId, count }));
+    process.exit(0);
+  }
   console.error("unknown mode");
   process.exit(2);
 }

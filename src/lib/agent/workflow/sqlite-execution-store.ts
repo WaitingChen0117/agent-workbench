@@ -225,7 +225,7 @@ export class SQLiteWorkflowExecutionStore implements WorkflowExecutionStore {
 
   async listPage(options: ListOptions): Promise<PageResult<WorkflowExecution>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ u: string; id: string }>("workflow-exec", options.cursor);
     const rows = (
       cursor
         ? this.db
@@ -245,7 +245,7 @@ export class SQLiteWorkflowExecutionStore implements WorkflowExecutionStore {
       items: page,
       nextCursor:
         hasMore && last
-          ? encodeCursor({ u: last.updatedAt ?? last.startedAt, id: last.executionId })
+          ? encodeCursor("workflow-exec", { u: last.updatedAt ?? last.startedAt, id: last.executionId })
           : undefined,
     };
   }

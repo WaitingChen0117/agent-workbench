@@ -54,6 +54,22 @@ export interface AgentTrace {
   steps: AgentTraceStep[];
 }
 
+/**
+ * Append-only Trace Event（Phase 10.8-B）：真正的事件日志，source of truth。
+ * steps 为其派生/查询友好视图。sequence 由 Store 原子分配。
+ */
+export interface TraceEvent {
+  traceId: string;
+  sequence: number;
+  eventId: string;
+  timestamp: string;
+  type: string;
+  payload?: unknown;
+  workflowId?: string;
+  executionId?: string;
+  nodeId?: string;
+}
+
 export interface AgentMetrics {
   task: { durationMs?: number; status: TraceStatus };
   agent: { stepCount: number; retryCount: number };

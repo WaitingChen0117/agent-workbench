@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import type { AgentTaskEvent } from "@/lib/agent/task/types";
 import { getTraceStore } from "@/lib/agent/trace/trace-store";
+import { redactSecrets } from "@/lib/agent/trace/sanitize";
 import type {
   AgentTrace,
   AgentTraceStep,
@@ -141,6 +142,19 @@ function handleEvent(
   const ts = event.timestamp;
   const data = (event.data ?? {}) as Record<string, unknown>;
   const step = Number(data.step);
+
+  // append-only 事件日志（source of truth）：每个事件只 append 一次（脱敏后）。
+  getTraceStore().appendTraceEvent(trace.traceId, {
+    traceId: trace.traceId,
+    sequence: 0,
+    eventId: event.id,
+    timestamp: ts,
+    type: event.type,
+    payload: redactSecrets(data),
+    workflowId: (data.workflowId as string | undefined) ?? spans.currentNode?.workflowId,
+    executionId: (data.executionId as string | undefined) ?? spans.currentNode?.executionId,
+    nodeId: (data.nodeId as string | undefined) ?? spans.currentNode?.nodeId,
+  });
 
   switch (event.type) {
     case "agent.step.started": {

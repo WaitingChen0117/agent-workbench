@@ -15,6 +15,7 @@ import {
   type ListOptions,
   type PageResult,
 } from "@/lib/agent/persistence/pagination";
+import { incrementPersistenceMetric } from "@/lib/agent/persistence/metrics";
 
 /**
  * TaskStore 抽象（Phase 10.1）
@@ -90,6 +91,7 @@ export class MemoryTaskStore implements TaskStore {
     };
     this.state.tasks.set(task.id, task);
     this.state.events.set(task.id, []);
+    incrementPersistenceMetric("taskCreates");
     return task;
   }
 
@@ -127,7 +129,7 @@ export class MemoryTaskStore implements TaskStore {
 
   async listPage(options: ListOptions): Promise<PageResult<AgentTask>> {
     const limit = clampLimit(options.limit);
-    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const cursor = decodeCursor<{ u: string; id: string }>("task", options.cursor);
     const sorted = [...this.state.tasks.values()].sort((a, b) =>
       a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : a.id < b.id ? 1 : -1,
     );
@@ -141,7 +143,7 @@ export class MemoryTaskStore implements TaskStore {
     return {
       items,
       nextCursor:
-        filtered.length > limit && last ? encodeCursor({ u: last.updatedAt, id: last.id }) : undefined,
+        filtered.length > limit && last ? encodeCursor("task", { u: last.updatedAt, id: last.id }) : undefined,
     };
   }
 
