@@ -4,6 +4,13 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import { assertTransition } from "@/lib/agent/task/state-machine";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 import type {
   CreateTaskInput,
   TaskPatch,
@@ -191,6 +198,31 @@ export class SQLiteTaskStore implements TaskStore {
       .prepare("SELECT * FROM agent_tasks ORDER BY created_at ASC")
       .all() as TaskRow[];
     return rows.map(rowToTask);
+  }
+
+  async listPage(options: ListOptions): Promise<PageResult<AgentTask>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const rows = (
+      cursor
+        ? this.db
+            .prepare(
+              `SELECT * FROM agent_tasks WHERE (updated_at < ? OR (updated_at = ? AND id < ?))
+               ORDER BY updated_at DESC, id DESC LIMIT ?`,
+            )
+            .all(cursor.u, cursor.u, cursor.id, limit + 1)
+        : this.db
+            .prepare("SELECT * FROM agent_tasks ORDER BY updated_at DESC, id DESC LIMIT ?")
+            .all(limit + 1)
+    ) as TaskRow[];
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit).map(rowToTask);
+    const last = page[page.length - 1];
+    return {
+      items: page,
+      nextCursor:
+        hasMore && last ? encodeCursor({ u: last.updatedAt, id: last.id }) : undefined,
+    };
   }
 
   async appendEvent(id: string, event: AgentTaskEvent): Promise<void> {

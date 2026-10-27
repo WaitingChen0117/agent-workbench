@@ -1,0 +1,22 @@
+{
+  "cases": [
+    { "id": "trace-append", "kind": "trace-append" },
+    { "id": "trace-append-order", "kind": "trace-append-order" },
+    { "id": "trace-idempotent", "kind": "trace-idempotent" },
+    { "id": "trace-restart", "kind": "trace-restart" },
+    { "id": "trace-resume-append", "kind": "trace-resume-append" },
+    { "id": "cleanup-disabled", "kind": "cleanup-disabled" },
+    { "id": "cleanup-enabled", "kind": "cleanup-enabled" },
+    { "id": "cleanup-concurrent", "kind": "cleanup-concurrent" },
+    { "id": "cleanup-active-preserved", "kind": "cleanup-active-preserved" },
+    { "id": "cleanup-pending-approval-preserved", "kind": "cleanup-pending-approval-preserved" },
+    { "id": "task-pagination", "kind": "task-pagination" },
+    { "id": "session-pagination", "kind": "session-pagination" },
+    { "id": "workflow-pagination", "kind": "workflow-pagination" },
+    { "id": "trace-pagination", "kind": "trace-pagination" },
+    { "id": "sqlite-busy-retry", "kind": "sqlite-busy-retry" },
+    { "id": "transaction-rollback", "kind": "transaction-rollback" },
+    { "id": "persistence-health", "kind": "persistence-health" },
+    { "id": "full-regression", "kind": "full-regression" }
+  ]
+}

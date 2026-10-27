@@ -1,8 +1,11 @@
+import { DatabaseSync } from "node:sqlite";
+
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import { getApprovalStore } from "@/lib/agent/approval/approval-store";
 import { getSessionStore } from "@/lib/agent/session/session-store";
 import { getWorkflowExecutionStore } from "@/lib/agent/workflow/execution-store";
 import { getTraceStore } from "@/lib/agent/trace/trace-store";
+import { tx } from "@/lib/agent/persistence/sqlite-util";
 
 /**
  * Persistence Cleanup / TTL（Phase 10.6-D）
@@ -23,16 +26,67 @@ export function getTtlDays(): number {
   return n;
 }
 
+export interface PersistenceCleanupConfig {
+  enabled: boolean;
+  ttlDays: number;
+}
+
+// 清理默认关闭（避免升级后启动即删数据），仅当 AGENT_PERSISTENCE_CLEANUP_ENABLED=true 开启
+export function getPersistenceCleanupConfig(): PersistenceCleanupConfig {
+  return {
+    enabled: process.env.AGENT_PERSISTENCE_CLEANUP_ENABLED === "true",
+    ttlDays: getTtlDays(),
+  };
+}
+
+const LOCK_STALE_MS = 60_000;
+
+// 轻量 SQLite 锁：避免多进程同时 cleanup。Memory 后端（无 DB 路径）直接视为已获得。
+function acquireCleanupLock(nowMs: number): { db: DatabaseSync; ok: boolean } | null {
+  const dbPath = process.env.AGENT_TASK_DB_PATH;
+  if (!dbPath || process.env.AGENT_TASK_STORE !== "sqlite") return null;
+  const db = new DatabaseSync(dbPath);
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec(
+    "CREATE TABLE IF NOT EXISTS agent_persistence_locks (name TEXT PRIMARY KEY, acquired_at INTEGER NOT NULL)",
+  );
+  const ok = tx(db, () => {
+    const row = db
+      .prepare("SELECT acquired_at FROM agent_persistence_locks WHERE name = 'cleanup'")
+      .get() as { acquired_at?: number } | undefined;
+    if (!row) {
+      db.prepare("INSERT INTO agent_persistence_locks (name, acquired_at) VALUES ('cleanup', ?)").run(nowMs);
+      return true;
+    }
+    if (nowMs - (row.acquired_at ?? 0) > LOCK_STALE_MS) {
+      db.prepare("UPDATE agent_persistence_locks SET acquired_at = ? WHERE name = 'cleanup'").run(nowMs);
+      return true;
+    }
+    return false;
+  });
+  return { db, ok };
+}
+
+function releaseCleanupLock(db: DatabaseSync): void {
+  try {
+    db.prepare("DELETE FROM agent_persistence_locks WHERE name = 'cleanup'").run();
+  } catch {
+    /* best-effort */
+  }
+}
+
 export interface CleanupResult {
   scannedTasks: number;
   deletedTasks: number;
   keptTasks: number;
   tracesDeleted: number;
+  locked?: boolean; // true 表示未获得清理锁而跳过
 }
 
 export interface CleanupOptions {
   ttlDays?: number;
   nowMs?: number; // 便于确定性测试注入
+  lock?: boolean; // 是否使用跨进程清理锁（启动触发时用）
 }
 
 export async function cleanupExpiredData(
@@ -40,6 +94,24 @@ export async function cleanupExpiredData(
 ): Promise<CleanupResult> {
   const ttlDays = options.ttlDays ?? getTtlDays();
   const nowMs = options.nowMs ?? new Date().getTime();
+
+  let lockDb: DatabaseSync | null = null;
+  if (options.lock) {
+    const lock = acquireCleanupLock(nowMs);
+    if (lock && !lock.ok) {
+      return { scannedTasks: 0, deletedTasks: 0, keptTasks: 0, tracesDeleted: 0, locked: true };
+    }
+    lockDb = lock?.db ?? null;
+  }
+
+  try {
+    return await runCleanup(ttlDays, nowMs);
+  } finally {
+    if (lockDb) releaseCleanupLock(lockDb);
+  }
+}
+
+async function runCleanup(ttlDays: number, nowMs: number): Promise<CleanupResult> {
   const cutoffMs = nowMs - ttlDays * DAY_MS;
   const cutoffIso = new Date(cutoffMs).toISOString();
 

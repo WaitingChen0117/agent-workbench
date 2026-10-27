@@ -8,6 +8,13 @@ import type {
   TaskStatus,
 } from "@/lib/agent/task/types";
 import type { AgentMessage } from "@/lib/agent/loop";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 
 /**
  * TaskStore 抽象（Phase 10.1）
@@ -36,6 +43,7 @@ export interface TaskStore {
   transition(id: string, to: TaskStatus): Promise<AgentTask | null>;
   delete(id: string): Promise<void>;
   list(): Promise<AgentTask[]>;
+  listPage(options: ListOptions): Promise<PageResult<AgentTask>>;
   appendEvent(id: string, event: AgentTaskEvent): Promise<void>;
   getEvents(id: string): Promise<AgentTaskEvent[]>;
 }
@@ -115,6 +123,26 @@ export class MemoryTaskStore implements TaskStore {
 
   async list(): Promise<AgentTask[]> {
     return [...this.state.tasks.values()];
+  }
+
+  async listPage(options: ListOptions): Promise<PageResult<AgentTask>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const sorted = [...this.state.tasks.values()].sort((a, b) =>
+      a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : a.id < b.id ? 1 : -1,
+    );
+    const filtered = cursor
+      ? sorted.filter(
+          (t) => t.updatedAt < cursor.u || (t.updatedAt === cursor.u && t.id < cursor.id),
+        )
+      : sorted;
+    const items = filtered.slice(0, limit);
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor:
+        filtered.length > limit && last ? encodeCursor({ u: last.updatedAt, id: last.id }) : undefined,
+    };
   }
 
   async appendEvent(id: string, event: AgentTaskEvent): Promise<void> {

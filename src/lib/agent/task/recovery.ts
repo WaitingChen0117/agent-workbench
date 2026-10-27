@@ -235,6 +235,7 @@ export async function initializeAgentRuntime(): Promise<RecoveryResult | null> {
     console.log(
       `[agent-recovery] scanned=${result.scanned} running=${result.running} waiting=${result.waiting} recovered=${result.recovered} keptWaiting=${result.keptWaiting} skipped=${result.skipped}`,
     );
+    await maybeRunStartupCleanup();
     return result;
   } catch (error) {
     console.error(
@@ -242,5 +243,30 @@ export async function initializeAgentRuntime(): Promise<RecoveryResult | null> {
       error instanceof Error ? error.message : "unknown error",
     );
     return null;
+  }
+}
+
+// 启动清理触发（Phase 10.7-B）：默认关闭；开启时用 SQLite 锁避免多进程重复。
+// 失败不得拖垮 /api/agent；不打印敏感数据。
+async function maybeRunStartupCleanup(): Promise<void> {
+  const { getPersistenceCleanupConfig, cleanupExpiredData } = await import(
+    "@/lib/agent/persistence/cleanup"
+  );
+  const config = getPersistenceCleanupConfig();
+  if (!config.enabled) return;
+  try {
+    const r = await cleanupExpiredData({ lock: true });
+    if (r.locked) {
+      console.log("[agent-cleanup] skipped (lock held by another process)");
+    } else {
+      console.log(
+        `[agent-cleanup] scanned=${r.scannedTasks} deleted=${r.deletedTasks} skipped=${r.keptTasks} tracesDeleted=${r.tracesDeleted}`,
+      );
+    }
+  } catch (error) {
+    console.error(
+      "[agent-cleanup] failed:",
+      error instanceof Error ? error.message : "unknown error",
+    );
   }
 }

@@ -14,6 +14,13 @@ import type {
   WorkflowExecutionPatch,
   WorkflowExecutionStore,
 } from "@/lib/agent/workflow/execution-store";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 
 /**
  * SQLiteWorkflowExecutionStore —— 复用 Task 的同一个 SQLite 库（AGENT_TASK_DB_PATH）。
@@ -214,6 +221,33 @@ export class SQLiteWorkflowExecutionStore implements WorkflowExecutionStore {
       .prepare("SELECT * FROM agent_workflow_executions ORDER BY started_at ASC")
       .all() as ExecRow[];
     return rows.map(toExec);
+  }
+
+  async listPage(options: ListOptions): Promise<PageResult<WorkflowExecution>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const rows = (
+      cursor
+        ? this.db
+            .prepare(
+              `SELECT * FROM agent_workflow_executions WHERE (updated_at < ? OR (updated_at = ? AND execution_id < ?))
+               ORDER BY updated_at DESC, execution_id DESC LIMIT ?`,
+            )
+            .all(cursor.u, cursor.u, cursor.id, limit + 1)
+        : this.db
+            .prepare("SELECT * FROM agent_workflow_executions ORDER BY updated_at DESC, execution_id DESC LIMIT ?")
+            .all(limit + 1)
+    ) as ExecRow[];
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit).map(toExec);
+    const last = page[page.length - 1];
+    return {
+      items: page,
+      nextCursor:
+        hasMore && last
+          ? encodeCursor({ u: last.updatedAt ?? last.startedAt, id: last.executionId })
+          : undefined,
+    };
   }
 
   async upsertNode(node: WorkflowNodeExecution): Promise<WorkflowNodeExecution> {

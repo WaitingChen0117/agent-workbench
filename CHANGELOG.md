@@ -15,6 +15,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.12.0] - 2026-10-27 — Persistence Reliability + Incremental Trace + Cleanup
+
+### Added
+
+- Incremental Trace persistence: `TraceStore` gains `createTrace` / `appendStep` (per-event, SQLite-assigned sequence via `BEGIN IMMEDIATE` + `MAX(sequence)+1`, idempotent by `stepId`) / `updateSummary`; `putTrace` kept as a compatibility layer. Collector now appends per open/close span instead of rewriting the whole trace each event.
+- Persistence cleanup trigger: `getPersistenceCleanupConfig()` (`AGENT_PERSISTENCE_CLEANUP_ENABLED`, default **false**); startup trigger in `initializeAgentRuntime` (globalThis-guarded, failure-safe, logs `[agent-cleanup] scanned/deleted/skipped`); lightweight SQLite lock (`agent_persistence_locks`) so concurrent processes don't double-clean (`cleanupExpiredData({ lock: true })`).
+- Pagination: shared `ListOptions`/`PageResult` + cursor helpers (`clampLimit` max 100 / default 20, base64url cursor, `InvalidCursorError`). `TaskStore.listPage`, `WorkflowExecutionStore.listPage`, `TraceStore.listPage`, `SessionStore.getMessagesPage` — all real SQLite `LIMIT` with stable `ORDER BY … DESC, id DESC` (messages by sequence ASC). Existing `list()`/`getMessages()` full-read kept (Resume uses full-read).
+- SQLite reliability: `withBusyRetry` (max 3, short backoff) + `tx()` (BEGIN IMMEDIATE → COMMIT / ROLLBACK) in `persistence/sqlite-util.ts`, applied to trace writes.
+- Persistence health: `getPersistenceHealth()` + `GET /api/agent/persistence/health` (read-only; backend/available/schemaReady/databaseFile basename + cleanup config; no secrets).
+- Evaluation: `persistence:reliability:evaluate` (18 cases) + `data/persistence-reliability-evaluation.json`.
+
+### Changed
+
+- Trace collector routes through the incremental `TraceStore` API; `resumeTrace` continues appending to the same `traceId` (no second trace) with sequence continuing from the persisted max.
+- `cleanupExpiredData` accepts `{ lock }`; returns `locked: true` when another process holds the cleanup lock.
+
+### Security
+
+- Cleanup still deletes only terminal (completed/failed/cancelled) data older than the TTL cutoff; never running/waiting tasks, pending approvals, active workflows, or waiting/active sessions. Default-off prevents accidental deletion on upgrade.
+- Trace persistence re-applies `redactSecrets` before writing (no token/authorization/api_key/password/secret persisted); health diagnostics expose no secrets and only a path basename.
+- Persistence errors surface distinctly from business rejections (Guard-denied is never masked as a SQLite error); transactions roll back on failure (no half-writes); busy retry is bounded (never infinite/long-blocking).
+- No new infrastructure: Node built-in `node:sqlite` + existing Event Bus only; git push stays mocked in evaluation.
+
 ## [1.11.0] - 2026-10-26 — Workflow Agent Node Resume + Trace Persistence + Persistence Cleanup
 
 ### Added

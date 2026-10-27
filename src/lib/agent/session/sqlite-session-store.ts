@@ -15,6 +15,13 @@ import {
   type SessionStatus,
 } from "@/lib/agent/session/types";
 import type { SessionStore } from "@/lib/agent/session/session-store";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 
 /**
  * SQLiteSessionStore —— 复用 Task 的同一个 SQLite 库（AGENT_TASK_DB_PATH），不新建第二个库。
@@ -204,6 +211,35 @@ export class SQLiteSessionStore implements SessionStore {
       content: (JSON.parse(r.payload) as { content: string }).content,
       createdAt: r.created_at,
     }));
+  }
+
+  async getMessagesPage(
+    sessionId: string,
+    options: ListOptions,
+  ): Promise<PageResult<AgentSessionMessage>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ seq: number }>(options.cursor);
+    const rows = this.db
+      .prepare(
+        `SELECT sequence, message_id, role, payload, created_at FROM agent_session_messages
+         WHERE session_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?`,
+      )
+      .all(sessionId, cursor?.seq ?? 0, limit + 1) as Array<
+      MessageRow & { sequence: number }
+    >;
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const items = page.map((r) => ({
+      messageId: r.message_id,
+      role: r.role as AgentSessionMessage["role"],
+      content: (JSON.parse(r.payload) as { content: string }).content,
+      createdAt: r.created_at,
+    }));
+    const last = page[page.length - 1];
+    return {
+      items,
+      nextCursor: hasMore && last ? encodeCursor({ seq: last.sequence }) : undefined,
+    };
   }
 
   async createPendingAction(

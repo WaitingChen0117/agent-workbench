@@ -9,6 +9,13 @@ import {
   type SessionPatch,
 } from "@/lib/agent/session/types";
 import { SQLiteSessionStore } from "@/lib/agent/session/sqlite-session-store";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -25,6 +32,11 @@ export interface SessionStore {
     message: { role: AgentSessionMessage["role"]; content: string },
   ): Promise<void>;
   getMessages(sessionId: string): Promise<AgentSessionMessage[]>;
+  // 分页读取消息（Phase 10.7-C）；Resume 仍用上面的 full-read 保证上下文完整
+  getMessagesPage(
+    sessionId: string,
+    options: ListOptions,
+  ): Promise<PageResult<AgentSessionMessage>>;
   // pending action：同一个 approval 只能对应一个 pending action
   createPendingAction(
     input: CreatePendingActionInput,
@@ -101,6 +113,21 @@ class MemorySessionStore implements SessionStore {
   }
   async getMessages(sessionId: string): Promise<AgentSessionMessage[]> {
     return [...(this.s.messages.get(sessionId) ?? [])];
+  }
+  async getMessagesPage(
+    sessionId: string,
+    options: ListOptions,
+  ): Promise<PageResult<AgentSessionMessage>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ offset: number }>(options.cursor);
+    const all = this.s.messages.get(sessionId) ?? [];
+    const offset = cursor?.offset ?? 0;
+    const items = all.slice(offset, offset + limit);
+    const nextOffset = offset + limit;
+    return {
+      items,
+      nextCursor: nextOffset < all.length ? encodeCursor({ offset: nextOffset }) : undefined,
+    };
   }
   async createPendingAction(
     input: CreatePendingActionInput,

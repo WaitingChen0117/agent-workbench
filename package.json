@@ -1,6 +1,6 @@
 {
   "name": "agent-workbench",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -22,7 +22,8 @@
     "workflow:persistence:evaluate": "tsx --env-file=.env.local scripts/workflow-persistence-evaluate.ts",
     "persistence:cleanup:evaluate": "tsx --env-file=.env.local scripts/persistence-cleanup-evaluate.ts",
     "trace:persistence:evaluate": "tsx --env-file=.env.local scripts/trace-persistence-evaluate.ts",
-    "workflow:agent-resume:evaluate": "tsx --env-file=.env.local scripts/workflow-agent-resume-evaluate.ts"
+    "workflow:agent-resume:evaluate": "tsx --env-file=.env.local scripts/workflow-agent-resume-evaluate.ts",
+    "persistence:reliability:evaluate": "tsx --env-file=.env.local scripts/persistence-reliability-evaluate.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.92",

@@ -3,6 +3,13 @@ import type {
   WorkflowNodeExecution,
   WorkflowStatus,
 } from "@/lib/agent/workflow/types";
+import {
+  clampLimit,
+  decodeCursor,
+  encodeCursor,
+  type ListOptions,
+  type PageResult,
+} from "@/lib/agent/persistence/pagination";
 import { SQLiteWorkflowExecutionStore } from "@/lib/agent/workflow/sqlite-execution-store";
 
 /**
@@ -32,6 +39,7 @@ export interface WorkflowExecutionStore {
   ): Promise<WorkflowExecution | null>;
   delete(executionId: string): Promise<void>;
   list(): Promise<WorkflowExecution[]>;
+  listPage(options: ListOptions): Promise<PageResult<WorkflowExecution>>;
   // Node 执行态
   upsertNode(node: WorkflowNodeExecution): Promise<WorkflowNodeExecution>;
   getNode(
@@ -105,6 +113,28 @@ class MemoryWorkflowExecutionStore implements WorkflowExecutionStore {
   }
   async list(): Promise<WorkflowExecution[]> {
     return [...this.s.executions.values()].map(clone);
+  }
+  async listPage(options: ListOptions): Promise<PageResult<WorkflowExecution>> {
+    const limit = clampLimit(options.limit);
+    const cursor = decodeCursor<{ u: string; id: string }>(options.cursor);
+    const key = (e: WorkflowExecution) => e.updatedAt ?? e.startedAt;
+    const sorted = [...this.s.executions.values()].sort((a, b) =>
+      key(a) < key(b) ? 1 : key(a) > key(b) ? -1 : a.executionId < b.executionId ? 1 : -1,
+    );
+    const filtered = cursor
+      ? sorted.filter(
+          (e) => key(e) < cursor.u || (key(e) === cursor.u && e.executionId < cursor.id),
+        )
+      : sorted;
+    const items = filtered.slice(0, limit).map(clone);
+    const last = items[items.length - 1];
+    return {
+      items,
+      nextCursor:
+        filtered.length > limit && last
+          ? encodeCursor({ u: key(last), id: last.executionId })
+          : undefined,
+    };
   }
   async upsertNode(node: WorkflowNodeExecution): Promise<WorkflowNodeExecution> {
     this.s.nodes.set(`${node.executionId}:${node.nodeId}`, clone(node));
