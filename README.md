@@ -10,9 +10,10 @@
 - **模型接入**：对话模型与 Embedding 模型通过环境变量配置，默认对接百度千帆（Qianfan）。
 - **MCP 与 Skills**：本地工具和文件系统 MCP 走同一套解析；技能从 `.agent/skills` 加载。
 - **Coding Agent**：`writeFile` 和 `runCommand` 必须先经过人工审批。
-- **Trace**：任务结束后仍可查看步骤、工具、审批和指标。设置 `AGENT_TRACE_STORE=sqlite` 后，Trace 写入同一个 SQLite；重启后的恢复事件会接在原来的记录上。
+- **Trace**：任务结束后仍可查看步骤、工具、审批和指标。设置 `AGENT_TRACE_STORE=sqlite` 后，每一步单独追加进同一个 SQLite，不再整份重写；重启后的恢复事件接在同一条 Trace 上。
+- **清理**：默认关闭。设 `AGENT_PERSISTENCE_CLEANUP_ENABLED=true` 后，进程启动时加锁清理超过 `AGENT_PERSISTENCE_TTL_DAYS`（默认 7 天）的终态数据。正在跑或等待审批的记录会留下。
+- **持久化诊断**：`GET /api/agent/persistence/health` 只读检查五个存储是否可用，只返回数据库文件名，不返回密钥或完整路径。
 - **Workflow**：提交节点和边，校验为有向无环图后在任务里执行。设置 `AGENT_WORKFLOW_EXECUTION_STORE=sqlite` 后，执行状态和每个节点写入同一个 SQLite。工具节点从下一节点继续；Agent 节点复用 Session，批准后继续该节点的循环，答完再往下走。已完成的节点不重跑。
-- **清理**：调用 `cleanupExpiredData()` 时，只删除超过 `AGENT_PERSISTENCE_TTL_DAYS`（默认 7 天）的终态任务及其 Trace、Session、审批和工作流记录。正在跑或等待审批的数据会留下。
 - **Git**：只读查看 status、diff、log、branch 和 show；`gitAdd`、`gitCommit` 与 `gitPush` 必须先过前置校验，再等人批准。推送只允许 `origin`，不能 force push。
 - **GitHub**：只读查看配置仓库的信息、Issue 和 Pull Request；不能创建、修改或合并。
 - **Task Persistence**：任务的创建、状态和事件都经过 `TaskStore`。默认仍是进程内内存；设置 `AGENT_TASK_STORE=sqlite` 后写入 `.data/agent.sqlite`。重启时 `running` 收成 failed，不重新执行。
@@ -21,7 +22,7 @@
 
 ## 架构演进
 
-当前版本是 **v1.11.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
+当前版本是 **v1.12.0**。下图是这一版当时的完整架构，各历史版本的图见 [docs/architecture](docs/architecture/README.md)。
 
 ```mermaid
 flowchart TB
@@ -105,10 +106,14 @@ flowchart TB
   recover --> apprStore
   recover --> sess
   recover --> execStore
+  recover --> cleanup{"清理已开启?"}
+  cleanup -->|默认否| skipClean["不删除"]
+  cleanup -->|是| ttl["只删过期终态"]
+  health["GET /persistence/health"] --> store
   runtime --> bus["Event Bus"]
   bus --> sse["SSE"]
   bus --> trace["Trace"]
-  trace --> traceStore["TraceStore"]
+  trace -->|追加一步| traceStore["TraceStore"]
   traceStore -->|默认| traceMem["MemoryTraceStore"]
   traceStore -->|sqlite| traceSql["SQLiteTraceStore"]
   traceSql --> db
@@ -133,6 +138,7 @@ flowchart TB
 | v1.9.0 Session | 对话历史可写入 SQLite；重启后批准会执行工具并重新进入 Agent Loop |
 | v1.10.0 工作流持久化 | 工作流执行和节点可写入 SQLite；批准后从下一节点继续，不重跑已完成节点 |
 | v1.11.0 Agent 节点与 Trace | 工作流 Agent 节点可跨进程继续；Trace 可落盘；终态数据可按天数清理 |
+| v1.12.0 持久化可靠性 | Trace 按步骤追加；清理默认关闭，开启后启动时加锁执行；列表可分页 |
 
 每个版本的分层和工作流见 [docs/architecture](docs/architecture/README.md)。
 
@@ -198,6 +204,7 @@ pnpm workflow:persistence:evaluate  # 工作流持久化与跨进程继续评估
 pnpm workflow:agent-resume:evaluate  # 工作流 Agent 节点跨进程恢复评估
 pnpm trace:persistence:evaluate  # Trace 持久化评估
 pnpm persistence:cleanup:evaluate  # 终态数据清理评估
+pnpm persistence:reliability:evaluate  # 增量 Trace、分页、清理锁与健康检查评估
 ```
 
 ## 目录结构
