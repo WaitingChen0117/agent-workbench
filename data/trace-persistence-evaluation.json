@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "id": "trace-create", "kind": "trace-create" },
+    { "id": "trace-event-persist", "kind": "trace-event-persist" },
+    { "id": "trace-event-order", "kind": "trace-event-order" },
+    { "id": "trace-restart-read", "kind": "trace-restart-read" },
+    { "id": "trace-workflow-read", "kind": "trace-workflow-read" },
+    { "id": "trace-agent-node-read", "kind": "trace-agent-node-read" },
+    { "id": "trace-sensitive-redaction", "kind": "trace-sensitive-redaction" },
+    { "id": "trace-summary", "kind": "trace-summary" },
+    { "id": "trace-idempotent", "kind": "trace-idempotent" },
+    { "id": "trace-cross-process", "kind": "trace-cross-process" }
+  ]
+}

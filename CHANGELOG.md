@@ -15,6 +15,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+## [1.11.0] - 2026-10-26 — Workflow Agent Node Resume + Trace Persistence + Persistence Cleanup
+
+### Added
+
+- Workflow **Agent Node** cross-process Full Resume: a workflow Agent Node now reuses the Phase 10.4 AgentSession (the workflow task gets a 1:1 Session) and the injectable Agent Loop runner — no second Agent Loop. After a restart, approving re-enters the SAME loop (`executeApprovedToolToSession` → `continueAgentNode`), which may raise further approvals and only completes the node when the agent returns a final answer, then continues the DAG.
+- Exported reusable resume primitive `executeApprovedToolToSession` (re-guard → resolveTools → execute once → append sanitized result to Session); shared by Agent Session resume and Workflow Agent Node resume.
+- Trace persistence: `TraceStore` abstraction + `MemoryTraceStore` + `SQLiteTraceStore` + `getTraceStore()` (`AGENT_TRACE_STORE=memory|sqlite`, default memory, reuses `AGENT_TASK_DB_PATH`). Tables `agent_traces` + `agent_trace_steps` (ORDER BY sequence). `resumeTrace()` re-attaches the collector in a new process so resume events join the same trace.
+- Persistence cleanup/TTL: `cleanupExpiredData()` + `getTtlDays()` (`AGENT_PERSISTENCE_TTL_DAYS`, default 7); deletes only terminal data older than the cutoff across Trace/Session/Approval/WorkflowExecution(+nodes)/Task(+events); idempotent.
+- Evaluations: `workflow:agent-resume:evaluate` (12), `trace:persistence:evaluate` (10), `persistence:cleanup:evaluate` (10), with `scripts/workflow-agent-child.ts` and `scripts/trace-child.ts` (real cross-process, deterministic stub runner).
+
+### Changed
+
+- `createAndStartWorkflowTask` creates a Session for the workflow task; `runAgentNode` runs the agent loop over that Session via `getAgentLoopRunner()` (gated tools) instead of calling `streamAgent` directly.
+- `resumeWorkflowExecution` handles `agent` nodes (previously `RESUME_UNSUPPORTED`) by delegating to the Agent Session resume path and continuing the DAG on completion.
+- Trace collector routes through `TraceStore` and re-persists the whole trace after each event (SQLite snapshot stays current for cross-process reads); trace API reads from the store.
+- Crash recovery already covers workflow agent nodes (running → failed `workflow_running_recovery`; waiting + pending approval → kept `workflow_approval_waiting`; waiting + no approval → failed `workflow_missing_approval`).
+
+### Security
+
+- Resume still re-runs `preApprovalGuard` and `resolveTools`; Guard-denied → `RESUME_GUARD_DENIED`, no tool execution. Agent Node never bypasses Permission Gate / ApprovalStore / Tool Resolver.
+- Execute-once preserved via atomic `ApprovalStore.resolve`: duplicate/concurrent approve never re-executes a tool (no duplicate file write / git add / push).
+- Trace persistence re-applies `redactSecrets` before writing to SQLite (token/authorization/api_key/password/secret never persisted); SQLite is treated as a sensitive boundary, not just the UI.
+- Cleanup never deletes running/waiting tasks, pending approvals, active workflow executions, or waiting/active sessions.
+- No new infrastructure: Node built-in `node:sqlite` + existing Event Bus only; git push stays mocked in evaluation.
+
 ## [1.10.0] - 2026-10-26 — Workflow Execution Persistence + Full Workflow Resume
 
 ### Added

@@ -264,4 +264,34 @@ function handleEvent(
       break;
     }
   }
+
+  // 每个事件处理后持久化整条 Trace（SQLite 下为快照更新；内存下同引用）。
+  // 保证跨进程可读到最新 Trace，而不只在最终完成时落盘。
+  traceStore.putTrace(trace);
+}
+
+/**
+ * 跨进程恢复 Trace 收集（Phase 10.6-C）：在新进程 resume 前调用，
+ * 载入已持久化的 Trace 并继续订阅后续事件（sequence 从已有最大值续增）。
+ */
+export function resumeTrace(taskId: string): void {
+  if (spanStates.has(taskId)) return; // 本进程已在收集
+  const existing = traceStore.getTraceByTask(taskId);
+  if (!existing) {
+    startTrace(taskId);
+    return;
+  }
+  const maxSeq = existing.steps.reduce((m, s) => Math.max(m, s.sequence), 0);
+  const spans: SpanState = {
+    seq: maxSeq,
+    agent: new Map(),
+    llm: new Map(),
+    tools: [],
+    approvals: new Map(),
+    nodes: new Map(),
+  };
+  spanStates.set(taskId, spans);
+  spans.unsubscribe = eventBus.subscribe(taskId, (event) =>
+    handleEvent(existing, spans, event),
+  );
 }

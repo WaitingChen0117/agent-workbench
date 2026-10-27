@@ -28,7 +28,7 @@ import {
   sanitizePendingInput,
   type SessionStatus,
 } from "@/lib/agent/session/types";
-import { startTrace } from "@/lib/agent/trace/collector";
+import { startTrace, resumeTrace } from "@/lib/agent/trace/collector";
 import {
   sanitizeToolInput,
   sanitizeToolOutput,
@@ -518,6 +518,8 @@ export async function applyApprovalDecision(
   );
 
   if (!hadWaiter) {
+    // 跨进程恢复：在新进程重新挂上 Trace 收集，使 resume 产生的事件也进入同一条 Trace
+    resumeTrace(taskId);
     // Workflow 任务走 Workflow Resume；普通 Agent 任务走 Agent Session Resume。
     const wfExec = await getWorkflowExecutionStore().getByTaskId(taskId);
     if (wfExec) {
@@ -570,6 +572,36 @@ async function resumeAgentSession(
     return;
   }
 
+  const r = await executeApprovedToolToSession(taskId, approval);
+  if (!r.ok) {
+    await taskStore.update(taskId, { error: { code: r.code, message: r.message } });
+    await taskStore.transition(taskId, "failed");
+    await syncSessionStatus(taskId, "failed");
+    emit(taskId, "task.failed", { code: r.code, message: r.message });
+    return;
+  }
+
+  // 重新进入同一个 Agent Loop（后台执行，不阻塞决策返回）。
+  void reenterAgentLoop(taskId);
+}
+
+export type ApprovedToolResult =
+  | { ok: true; output: unknown; step: number }
+  | {
+      ok: false;
+      code: "RESUME_GUARD_DENIED" | "RESUME_UNSUPPORTED" | "RESUME_TOOL_ERROR";
+      message: string;
+    };
+
+/**
+ * 跨进程 Resume 的共享原语（Phase 10.4/10.6）：
+ * 重跑 Guard → resolveTools → 执行被批准工具恰好一次 → 工具结果脱敏后追加回 Session。
+ * 不负责收尾任务/工作流（由调用方根据 Agent Task / Workflow Agent Node 场景决定）。
+ */
+export async function executeApprovedToolToSession(
+  taskId: string,
+  approval: AgentApproval,
+): Promise<ApprovedToolResult> {
   // 1. 安全校验必须重跑
   const guard = await preApprovalGuard(
     approval.toolName,
@@ -577,42 +609,29 @@ async function resumeAgentSession(
     WORKSPACE_ROOT,
   );
   if (!guard.ok) {
-    await taskStore.update(taskId, {
-      error: { code: "RESUME_GUARD_DENIED", message: guard.error ?? "denied" },
-    });
-    await taskStore.transition(taskId, "failed");
-    await syncSessionStatus(taskId, "failed");
-    emit(taskId, "task.failed", {
-      code: "RESUME_GUARD_DENIED",
-      message: guard.error,
-    });
-    return;
+    return { ok: false, code: "RESUME_GUARD_DENIED", message: guard.error ?? "denied" };
   }
 
   // 2. 工具仍需存在且可执行
   const tools = await resolveTools();
   const tool = tools[approval.toolName];
   if (!tool || typeof tool.execute !== "function") {
-    // 如 Workflow 审批节点等非本地工具：跨进程不可 resume（会话/执行态未持久化）。
-    // 在任何状态流转 / tool.started 之前失败收尾，不尝试任何副作用。
-    const message = `resume unsupported: tool not found "${approval.toolName}"`;
-    await taskStore.update(taskId, {
-      error: { code: "RESUME_UNSUPPORTED", message },
-    });
-    await taskStore.transition(taskId, "failed");
-    await syncSessionStatus(taskId, "failed");
-    emit(taskId, "task.failed", { code: "RESUME_UNSUPPORTED", message });
-    return;
+    return {
+      ok: false,
+      code: "RESUME_UNSUPPORTED",
+      message: `resume unsupported: tool not found "${approval.toolName}"`,
+    };
   }
 
   const session = await sessionStore.getByTaskId(taskId);
+  const task = await taskStore.get(taskId);
 
-  await taskStore.transition(taskId, "running");
+  await taskStore.transition(taskId, "running").catch(() => undefined);
   await syncSessionStatus(taskId, "running");
   await sessionStore.updatePendingAction(approval.id, "executing");
 
   // 3. 执行被批准的工具恰好一次
-  const step = (task.currentStep ?? 0) + 1;
+  const step = (task?.currentStep ?? 0) + 1;
   emit(taskId, "tool.started", {
     step,
     tool: approval.toolName,
@@ -650,20 +669,11 @@ async function resumeAgentSession(
         ),
       });
     }
+    return { ok: true, output, step };
   } catch (error) {
     const message = error instanceof Error ? error.message : "resume tool failed";
-    await taskStore.update(taskId, {
-      error: { code: "RESUME_TOOL_ERROR", message },
-    });
-    await taskStore.transition(taskId, "failed");
-    await syncSessionStatus(taskId, "failed");
-    emit(taskId, "task.failed", { code: "RESUME_TOOL_ERROR", message });
-    return;
+    return { ok: false, code: "RESUME_TOOL_ERROR", message };
   }
-
-  // 5. 重新进入同一个 Agent Loop（后台执行，不阻塞决策返回）。
-  //    若 LLM 再次请求 approval_required 工具，会再次进入 waiting + 新 pending action。
-  void reenterAgentLoop(taskId);
 }
 
 // 用「当前 Session 的完整消息历史」重新进入 Agent Loop。无 Session 时回退到 task.messages。

@@ -2,13 +2,17 @@ import { randomUUID } from "node:crypto";
 
 import type { ToolSet } from "ai";
 
-import { streamAgent, MAX_AGENT_STEPS } from "@/lib/agent/loop";
+import { MAX_AGENT_STEPS, type AgentMessage, type AgentResult } from "@/lib/agent/loop";
 import { getTaskStore } from "@/lib/agent/task/task-store";
 import {
   emit,
   makeLoopEventHandler,
   wrapToolsWithPermissions,
+  getAgentLoopRunner,
+  executeApprovedToolToSession,
 } from "@/lib/agent/task/runtime";
+import { getSessionStore } from "@/lib/agent/session/session-store";
+import { sanitizeMessageContent } from "@/lib/agent/session/types";
 import * as eventBus from "@/lib/agent/task/event-bus";
 import { resolveTools } from "@/lib/agent/tool-resolver";
 import { loadSkillInstructions } from "@/lib/agent/skills";
@@ -49,8 +53,38 @@ function nowIso(): string {
 
 const taskStore = getTaskStore();
 const execStore: WorkflowExecutionStore = getWorkflowExecutionStore();
+const sessionStore = getSessionStore();
 
 const WORKSPACE_ROOT = process.cwd();
+
+// 用 Session 的完整消息历史跑一次 Agent Loop（Workflow Agent Node 专用，不收尾 Task）。
+// 复用可注入 runner（生产=streamAgent）。审批会在 gate 内阻塞，由上层订阅器关联到当前节点。
+async function runWorkflowAgentLoop(
+  taskId: string,
+  sessionId: string | null,
+  fallbackMessages: AgentMessage[],
+  maxSteps: number,
+  tools: ToolSet,
+  skillInstructions: string,
+  abortSignal: AbortSignal,
+): Promise<AgentResult> {
+  const messages: AgentMessage[] = sessionId
+    ? (await sessionStore.getMessages(sessionId)).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+    : fallbackMessages;
+  return getAgentLoopRunner()({
+    taskId,
+    sessionId,
+    messages,
+    maxSteps,
+    tools,
+    instructions: skillInstructions,
+    onEvent: makeLoopEventHandler(taskId),
+    abortSignal,
+  });
+}
 
 interface ExecutorContext {
   taskId: string;
@@ -147,16 +181,26 @@ function buildExecutors(ctx: ExecutorContext): WorkflowExecutors {
     persistExecution,
 
     async runAgentNode(node: WorkflowNode, context) {
+      // Agent Node 复用 Phase 10.4 AgentSession：把节点指令写入 workflow 任务的 Session，
+      // 用同一个可注入 Agent Loop runner 跑（非另造 Loop）。审批经现有 gate → 持久化 pending action。
       const instructions = String(node.config?.instructions ?? "继续完成当前步骤。");
       const contextHint = `\n\n[workflow context]\n${JSON.stringify(context).slice(0, 2000)}`;
-      const result = await streamAgent({
-        messages: [{ role: "user", content: instructions + contextHint }],
-        tools: ctx.tools,
-        instructions: ctx.skillInstructions,
-        maxSteps: Number(node.config?.maxSteps ?? MAX_AGENT_STEPS),
-        abortSignal: ctx.abortController.signal,
-        onEvent: makeLoopEventHandler(taskId),
-      });
+      const session = await sessionStore.getByTaskId(taskId);
+      if (session) {
+        await sessionStore.appendMessage(session.sessionId, {
+          role: "user",
+          content: sanitizeMessageContent(instructions + contextHint),
+        });
+      }
+      const result = await runWorkflowAgentLoop(
+        taskId,
+        session?.sessionId ?? null,
+        [{ role: "user", content: instructions + contextHint }],
+        Number(node.config?.maxSteps ?? MAX_AGENT_STEPS),
+        ctx.tools,
+        ctx.skillInstructions,
+        ctx.abortController.signal,
+      );
       return { answer: result.answer, steps: result.steps };
     },
 
@@ -270,6 +314,37 @@ async function finalizeTask(execution: WorkflowExecution): Promise<void> {
   }
 }
 
+// 订阅 approval.required：把 approvalId 关联到当前节点 + execution → waiting。
+// 首次运行与 Agent Node resume 共用，保证新审批也能被持久化定位。
+function subscribeApprovalLink(
+  taskId: string,
+  executionId: string,
+  getNodeId: () => string | undefined,
+  nodeMap: Map<string, WorkflowNode>,
+): () => void {
+  return eventBus.subscribe(taskId, (e) => {
+    if (e.type !== "approval.required") return;
+    const approvalId = (e.data as { approvalId?: string }).approvalId;
+    const nodeId = getNodeId();
+    if (!approvalId || !nodeId) return;
+    const node = nodeMap.get(nodeId);
+    if (!node) return;
+    void (async () => {
+      const existing = await execStore.getNode(executionId, nodeId);
+      await execStore.upsertNode({
+        executionId,
+        nodeId,
+        nodeType: node.type,
+        status: "waiting",
+        startedAt: existing?.startedAt ?? nowIso(),
+        approvalId,
+        attempt: existing?.attempt ?? 1,
+      });
+      await execStore.update(executionId, { status: "waiting" });
+    })();
+  });
+}
+
 // 共享执行体：首次运行与 resume 都走这里（resume 时传 resumeFromNodeId）。
 async function runWorkflowExecution(
   execution: WorkflowExecution,
@@ -280,29 +355,14 @@ async function runWorkflowExecution(
   const abortController = new AbortController();
   const nodeMap = new Map(definition.nodes.map((n) => [n.id, n]));
 
-  // 订阅 gate / approval 事件：approval_required 的「工具节点」由 gate 创建审批，
+  // 订阅 gate / approval 事件：approval_required 的节点由 gate 创建审批，
   // 这里把 approvalId 关联到当前 waiting 节点并把 execution 置 waiting（不绕过 gate）。
-  const unsub = eventBus.subscribe(taskId, (e) => {
-    if (e.type !== "approval.required") return;
-    const approvalId = (e.data as { approvalId?: string }).approvalId;
-    const nodeId = execution.currentNodeId;
-    if (!approvalId || !nodeId) return;
-    const node = nodeMap.get(nodeId);
-    if (!node) return;
-    void (async () => {
-      const existing = await execStore.getNode(execution.executionId, nodeId);
-      await execStore.upsertNode({
-        executionId: execution.executionId,
-        nodeId,
-        nodeType: node.type,
-        status: "waiting",
-        startedAt: existing?.startedAt ?? nowIso(),
-        approvalId,
-        attempt: existing?.attempt ?? 1,
-      });
-      await execStore.update(execution.executionId, { status: "waiting" });
-    })();
-  });
+  const unsub = subscribeApprovalLink(
+    taskId,
+    execution.executionId,
+    () => execution.currentNodeId,
+    nodeMap,
+  );
 
   try {
     const [baseTools, skillInstructions] = await Promise.all([
@@ -358,6 +418,8 @@ export async function createAndStartWorkflowTask(input: {
     messages: [{ role: "user", content: `workflow:${definition.name}` }],
     maxSteps: definition.maxSteps ?? 100,
   });
+  // 为 workflow 任务建立 1:1 Session，供 Agent Node 复用 Phase 10.4 的会话/恢复能力
+  await sessionStore.create({ taskId: task.id });
   startTrace(task.id);
   emit(task.id, "task.created");
 
@@ -421,13 +483,9 @@ export async function resumeWorkflowExecution(
     return failWorkflow(execution, "RESUME_NODE_MISSING", "waiting node not in def");
   }
 
-  // Agent 节点跨进程 resume：工作流内 Agent 节点无持久化会话，诚实标记不支持。
+  // Agent 节点跨进程 resume：复用 Phase 10.4 AgentSession，继续同一个 Agent Loop。
   if (node.type === "agent") {
-    return failWorkflow(
-      execution,
-      "RESUME_UNSUPPORTED",
-      "agent node cannot be resumed across process",
-    );
+    return resumeWorkflowAgentNode(execution, definition, node, waiting.approvalId);
   }
 
   // 定位审批记录（已被 applyApprovalDecision 置为 approved）
@@ -545,6 +603,128 @@ export async function resumeWorkflowExecution(
   fresh.definition = definition;
   void runWorkflowExecution(fresh, definition, { resumeFromNodeId: next });
   return { ok: true, status: "resumed" };
+}
+
+// Agent Node 跨进程 resume：执行被批准工具一次 → 回写 Session → 后台继续同一个 Agent Loop。
+async function resumeWorkflowAgentNode(
+  execution: WorkflowExecution,
+  definition: WorkflowDefinition,
+  node: WorkflowNode,
+  approvalId: string | undefined,
+): Promise<WorkflowResumeResult> {
+  void definition;
+  const approval = approvalId ? await getApprovalStore().get(approvalId) : null;
+  if (!approval) {
+    return failWorkflow(execution, "RESUME_NO_APPROVAL", "agent node has no approval");
+  }
+  await execStore.transition(execution.executionId, "running");
+  await taskStore.transition(execution.taskId, "running").catch(() => undefined);
+  const existing = await execStore.getNode(execution.executionId, node.id);
+  await execStore.upsertNode({
+    executionId: execution.executionId,
+    nodeId: node.id,
+    nodeType: "agent",
+    status: "running",
+    startedAt: existing?.startedAt ?? nowIso(),
+    approvalId,
+    attempt: existing?.attempt ?? 1,
+  });
+
+  // 执行被批准工具恰好一次（重跑 Guard + Tool Resolver），结果追加回 Session
+  const r = await executeApprovedToolToSession(execution.taskId, approval);
+  if (!r.ok) {
+    return failWorkflow(execution, r.code, r.message);
+  }
+
+  // 后台继续同一个 Agent Loop：产出 answer → 节点完成 + 继续 DAG；新审批 → 再次 waiting
+  void continueAgentNode(execution.executionId, node.id);
+  return { ok: true, status: "resumed" };
+}
+
+async function continueAgentNode(
+  executionId: string,
+  nodeId: string,
+): Promise<void> {
+  const execution = await execStore.get(executionId);
+  const definition = execution?.definition;
+  if (!execution || !definition) return;
+  const node = definition.nodes.find((n) => n.id === nodeId);
+  if (!node) return;
+  const taskId = execution.taskId;
+  const nodeMap = new Map(definition.nodes.map((n) => [n.id, n]));
+  const abortController = new AbortController();
+  const unsub = subscribeApprovalLink(taskId, executionId, () => nodeId, nodeMap);
+  try {
+    const [baseTools, skill] = await Promise.all([
+      resolveTools(),
+      loadSkillInstructions(),
+    ]);
+    const tools = wrapToolsWithPermissions(baseTools, { taskId, abortController });
+    const session = await sessionStore.getByTaskId(taskId);
+    const result = await runWorkflowAgentLoop(
+      taskId,
+      session?.sessionId ?? null,
+      [],
+      Number(node.config?.maxSteps ?? MAX_AGENT_STEPS),
+      tools,
+      skill,
+      abortController.signal,
+    );
+    // 到这里说明 Agent Loop 已产出 final answer（而非再次 waiting）
+    const key = String(node.config?.output ?? "agentResult");
+    const nodeResult = { answer: result.answer, steps: result.steps };
+    execution.context[key] = nodeResult;
+    const existing = await execStore.getNode(executionId, nodeId);
+    await execStore.upsertNode({
+      executionId,
+      nodeId,
+      nodeType: "agent",
+      status: "completed",
+      startedAt: existing?.startedAt ?? nowIso(),
+      endedAt: nowIso(),
+      result: sanitizeToolOutput(nodeId, nodeResult),
+      approvalId: existing?.approvalId,
+      attempt: existing?.attempt ?? 1,
+    });
+    emit(taskId, "workflow.node.completed", {
+      workflowId: execution.workflowId,
+      executionId,
+      nodeId,
+      nodeType: "agent",
+    });
+    await execStore.update(executionId, {
+      status: "running",
+      context: execution.context,
+      currentNodeId: nodeId,
+    });
+    const next = resolveNext(definition, nodeId, false, undefined);
+    if (!next) {
+      execution.status = "completed";
+      execution.endedAt = nowIso();
+      await execStore.update(executionId, {
+        status: "completed",
+        endedAt: execution.endedAt,
+        context: execution.context,
+      });
+      emit(taskId, "workflow.completed", {
+        workflowId: execution.workflowId,
+        executionId,
+      });
+      await finalizeTask(execution);
+    } else {
+      const fresh = (await execStore.get(executionId)) ?? execution;
+      fresh.definition = definition;
+      void runWorkflowExecution(fresh, definition, { resumeFromNodeId: next });
+    }
+  } catch (error) {
+    await failWorkflow(
+      execution,
+      "AGENT_NODE_ERROR",
+      error instanceof Error ? error.message : "agent node error",
+    );
+  } finally {
+    unsub();
+  }
 }
 
 async function failWorkflow(

@@ -1,0 +1,14 @@
+{
+  "cases": [
+    { "id": "cleanup-expired-completed", "kind": "cleanup-expired-completed" },
+    { "id": "cleanup-expired-failed", "kind": "cleanup-expired-failed" },
+    { "id": "cleanup-expired-cancelled", "kind": "cleanup-expired-cancelled" },
+    { "id": "cleanup-keeps-running", "kind": "cleanup-keeps-running" },
+    { "id": "cleanup-keeps-waiting", "kind": "cleanup-keeps-waiting" },
+    { "id": "cleanup-keeps-pending-approval", "kind": "cleanup-keeps-pending-approval" },
+    { "id": "cleanup-keeps-active-workflow", "kind": "cleanup-keeps-active-workflow" },
+    { "id": "cleanup-keeps-waiting-session", "kind": "cleanup-keeps-waiting-session" },
+    { "id": "cleanup-trace", "kind": "cleanup-trace" },
+    { "id": "cleanup-idempotent", "kind": "cleanup-idempotent" }
+  ]
+}

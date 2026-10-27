@@ -1,0 +1,16 @@
+{
+  "cases": [
+    { "id": "agent-node-create", "kind": "agent-node-create" },
+    { "id": "agent-node-session-created", "kind": "agent-node-session-created" },
+    { "id": "agent-node-approval-waiting", "kind": "agent-node-approval-waiting" },
+    { "id": "agent-node-restart-persistence", "kind": "agent-node-restart-persistence" },
+    { "id": "agent-node-approval-resume", "kind": "agent-node-approval-resume" },
+    { "id": "agent-node-reenter-loop", "kind": "agent-node-reenter-loop" },
+    { "id": "agent-node-second-approval", "kind": "agent-node-second-approval" },
+    { "id": "agent-node-full-resume", "kind": "agent-node-full-resume" },
+    { "id": "agent-node-no-duplicate-side-effect", "kind": "agent-node-no-duplicate-side-effect" },
+    { "id": "agent-node-guard-denied", "kind": "agent-node-guard-denied" },
+    { "id": "agent-node-missing-approval", "kind": "agent-node-missing-approval" },
+    { "id": "agent-node-running-recovery", "kind": "agent-node-running-recovery" }
+  ]
+}
